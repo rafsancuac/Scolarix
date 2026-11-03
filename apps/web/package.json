@@ -1,0 +1,34 @@
+{
+  "name": "@marketplace/web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Student-first digital productivity marketplace — storefront, customer dashboard, and admin console.",
+  "scripts": {
+    "dev": "next dev -H 0.0.0.0 -p 3000",
+    "build": "next build",
+    "start": "next start -H 0.0.0.0 -p 3000",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test tests/*.test.ts",
+    "verify-financials": "tsx scripts/verify-financials.mjs",
+    "test:watch": "tsx --test --watch tests/*.test.ts",
+    "check": "npm run typecheck && npm run test && npm run verify-financials"
+  },
+  "dependencies": {
+    "next": "16.4.5",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "4.3.4",
+    "@types/node": "22.13.5",
+    "@types/react": "19.1.0",
+    "@types/react-dom": "19.1.0",
+    "tailwindcss": "4.3.4",
+    "tsx": "^4.19.2",
+    "typescript": "5.9.3"
+  },
+  "engines": {
+    "node": ">=20.9.0"
+  }
+}

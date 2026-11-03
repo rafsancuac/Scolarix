@@ -1,0 +1,25 @@
+node_modules/
+.next/
+out/
+build/
+dist/
+*.tsbuildinfo
+next-env.d.ts.bak
+.env
+.env.local
+.env*.local
+.DS_Store
+coverage/
+playwright-report/
+test-results/
+
+# Local JSONL adapter store (apps/web/src/lib/request-store.ts).
+# Swap for PostgreSQL in Phase 2; never commit customer submissions.
+.data/
+*.jsonl
+
+# Prisma generated client
+packages/database/generated/
+
+# Docker
+docker-compose.override.yml

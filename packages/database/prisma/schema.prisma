@@ -1,0 +1,1408 @@
+// =============================================================================
+// {{BRAND_NAME}} — Prisma schema (spec §14)
+//
+// Design rules encoded here, not just documented:
+//
+//   1. MONEY IS INTEGER POISHA. Every monetary column is `Int` in minor units
+//      (1 BDT = 100 poisha). There is no Float and no Decimal in the money path
+//      (§1.1, §6 rule 1). A float column would silently break reconciliation.
+//
+//   2. ORDER LINES ARE IMMUTABLE SNAPSHOTS. `OrderLine` copies the name, SKU,
+//      price and discount ladder at purchase time and carries no live FK to the
+//      catalogue price. Changing a plan's price afterwards never changes an old
+//      order (§6 rule 2, mandatory test #6).
+//
+//   3. SOFT DELETE FOR PRODUCTS. `Product.deletedAt` — a deleted product stays
+//      referenced by its orders. FKs from orders use `Restrict` so history can
+//      never be orphaned (§6 rule 11).
+//
+//   4. UTC EVERYWHERE. All DateTime columns store UTC; display-time conversion
+//      happens in one `formatDate()` helper (§6 rule 12).
+//
+//   5. IDEMPOTENCY KEYS ARE UNIQUE. `WebhookEvent.providerEventId`,
+//      `FulfillmentJob.idempotencyKey` and `LedgerEntry.idempotencyKey` are
+//      @unique so a replayed callback cannot double-deliver or double-post
+//      (§6 rule 5, mandatory test #1).
+//
+//   6. THE AUDIT LOG IS APPEND-ONLY. `AuditLog` has no update path in the
+//      application layer, and sensitive reads are logged too (§6 rule 7).
+//
+//   7. SECRETS NEVER STORED IN CLEAR. Passwords are Argon2id hashes, TOTP
+//      secrets are encrypted at rest, reset tokens are hashed with a 15-minute
+//      TTL, and no card number, PIN or OTP column exists anywhere (§19).
+//
+// Wiring status: this schema is the Phase 2 target. The web app currently runs
+// on the seeded fixture adapter (DATA_ADAPTER=static) because this sandbox has
+// no PostgreSQL. `npm run db:up && npx prisma migrate dev` on a machine with
+// Docker is the first step to switching over.
+// =============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// -----------------------------------------------------------------------------
+// Enums — one source of truth for every state machine (§15)
+// -----------------------------------------------------------------------------
+
+enum Role {
+  SUPER_ADMIN
+  ADMIN
+  FINANCE
+  SUPPORT
+  COMPLIANCE
+  CUSTOMER
+}
+
+enum AccountStatus {
+  PENDING_VERIFICATION
+  ACTIVE
+  SUSPENDED
+  DELETED
+}
+
+enum SessionKind {
+  BROWSER
+  API
+}
+
+enum OfferingType {
+  PERSONAL_SUBSCRIPTION
+  GIFT_VOUCHER
+  INSTITUTIONAL_LICENSE
+  EDUCATION_REFERRAL
+  OWN_PRODUCT
+  SERVICE
+}
+
+enum AuthorizationStatus {
+  PENDING_VERIFICATION
+  EXPIRED_EVIDENCE
+  AUTHORIZED_RESELLER
+  OFFICIAL_PARTNER
+  PERMITTED_GIFT_CODE
+  EDUCATION_REFERRAL
+  OWN_PRODUCT
+  SERVICE
+  UNAVAILABLE_INDIVIDUAL_LICENSE
+}
+
+enum LicenceType {
+  GIFT_CODE
+  RESELLER_PROVISIONED
+  EDUCATION_REFERRAL
+  INSTITUTIONAL
+  OWN_PRODUCT
+}
+
+enum DeliveryMethod {
+  AUTOMATED_CODE
+  AUTOMATED_API
+  MANUAL
+  SERVICE
+}
+
+enum InventoryMode {
+  UNLIMITED
+  TRACKED
+  CODE_VAULT
+}
+
+enum RefundEligibility {
+  NON_REFUNDABLE
+  REFUNDABLE_BEFORE_DELIVERY
+  REFUNDABLE_WITHIN_WINDOW
+}
+
+enum RenewalCapability {
+  PLATFORM_RENEWAL
+  PROVIDER_BILLING_ONLY
+  REMINDER_ONLY
+}
+
+enum PublishStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum PlanAudience {
+  STANDARD
+  STUDENT
+  EDUCATION
+  TEAM
+  ENTERPRISE
+}
+
+/// §15.1 — payment state machine. Fulfilment may only be enqueued from a
+/// transition INTO `SUCCEEDED`, and only inside that same transaction.
+enum PaymentStatus {
+  INITIATED
+  GATEWAY_SESSION_CREATED
+  REDIRECTED
+  VERIFICATION_PENDING
+  SUCCEEDED
+  FAILED
+  MANUAL_REVIEW
+  EXPIRED
+  PARTIALLY_REFUNDED
+  REFUNDED
+}
+
+/// §15.2 — fulfilment state machine. FAILED retries up to 5 times then goes to
+/// MANUAL_QUEUE. Claims are atomic (`FOR UPDATE SKIP LOCKED`).
+enum FulfillmentStatus {
+  QUEUED
+  PROCESSING
+  DELIVERED
+  PARTIALLY_DELIVERED
+  FAILED
+  MANUAL_QUEUE
+  RETURNED
+  REVERSED
+  CANCELLED
+}
+
+/// §15.3 — order status. Derived by ONE function from payment + fulfilment
+/// state; never set directly by a caller.
+enum OrderStatus {
+  DRAFT
+  PENDING_PAYMENT
+  PAYMENT_REVIEW
+  PAID
+  PROCESSING
+  DELIVERED
+  COMPLETED
+  CANCELLED
+  REFUND_REQUESTED
+  PARTIALLY_REFUNDED
+  REFUNDED
+  FAILED
+  EXPIRED
+}
+
+enum PaymentProvider {
+  SSLCOMMERZ
+  BKASH
+  NAGAD
+  ROCKET
+  MANUAL_BANK
+}
+
+enum DiscountType {
+  SALE
+  BUNDLE
+  STUDENT
+  COUPON
+}
+
+/// Ledger direction. `LedgerEntry` is append-only and is the sole source for
+/// Gross, Net and Contribution Margin (§6 rule 10).
+enum LedgerDirection {
+  DEBIT
+  CREDIT
+}
+
+enum LedgerKind {
+  SALE
+  REFUND
+  GATEWAY_FEE
+  COGS
+  FULFILLMENT_COST
+  PAYOUT
+  ADJUSTMENT
+  VAT_PAYABLE
+}
+
+enum ServiceRequestStatus {
+  SUBMITTED
+  INTEGRITY_REVIEW
+  DECLINED
+  QUOTED
+  QUOTE_EXPIRED
+  ACCEPTED
+  PENDING_PAYMENT
+  IN_PROGRESS
+  REVISION_REQUESTED
+  DELIVERED
+  COMPLETED
+  CANCELLED
+  DISPUTED
+}
+
+enum ServicePricingModel {
+  FIXED
+  PER_UNIT
+  CUSTOM_QUOTE
+}
+
+enum VerificationStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+  EXPIRED
+}
+
+enum TicketStatus {
+  OPEN
+  PENDING_CUSTOMER
+  PENDING_INTERNAL
+  ESCALATED
+  RESOLVED
+  CLOSED
+}
+
+enum TicketPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum CodeStatus {
+  AVAILABLE
+  RESERVED
+  ASSIGNED
+  CONSUMED
+  EXPIRED
+  REVOKED
+}
+
+enum PayoutStatus {
+  PENDING
+  APPROVED
+  PAID
+  FAILED
+  CANCELLED
+}
+
+// -----------------------------------------------------------------------------
+// Identity & access (§14.2, §17.6 Auth.js v5, DB-session strategy)
+// -----------------------------------------------------------------------------
+
+model User {
+  id             String        @id @default(cuid())
+  email          String        @unique
+  /// Argon2id hash (m=64MB, t=3, p=4). Never a plaintext password (§19.2).
+  passwordHash   String?
+  name           String
+  phone          String?
+  role           Role          @default(CUSTOMER)
+  status         AccountStatus @default(PENDING_VERIFICATION)
+  emailVerifiedAt DateTime?
+  /// BCP-47. `en` at launch; `bn` behind FEATURE_I18N_BN (D16).
+  locale         String        @default("en")
+  timeZone       String        @default("Asia/Dhaka")
+  /// Idle timeout differs by role: 24h customer, 8h admin (§17.6).
+  lastActiveAt   DateTime?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  deletedAt      DateTime?
+
+  accounts           Account[]
+  sessions           Session[]
+  passwordResets     PasswordReset[]
+  totp               TotpCredential?
+  orders             Order[]
+  subscriptions      Subscription[]
+  serviceRequests    ServiceRequest[]
+  studentVerification StudentVerification?
+  tickets            Ticket[]
+  auditLogs          AuditLog[]
+  downloads          DownloadLog[]
+  affiliate          Affiliate?
+  wishlist           WishlistItem[]
+
+  @@index([role, status])
+  @@index([email])
+  @@map("users")
+}
+
+/// Auth.js OAuth/OIDC accounts. `providerAccountId` is unique per provider.
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+  @@map("accounts")
+}
+
+/// DB-session strategy — NOT JWT. A revoked session is revoked immediately,
+/// which a stateless token cannot do (§17.6, mandatory test #24).
+model Session {
+  id           String      @id @default(cuid())
+  sessionToken String      @unique
+  userId       String
+  kind         SessionKind @default(BROWSER)
+  ipAddress    String?
+  userAgent    String?
+  expiresAt    DateTime
+  /// Absolute lifetime cap (30 days) independent of idle renewal (§17.6).
+  absoluteExpiresAt DateTime
+  createdAt    DateTime    @default(now())
+  revokedAt    DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@index([sessionToken])
+  @@map("sessions")
+}
+
+/// Hashed reset token with a 15-minute TTL (§17.6). The raw token is never
+/// stored, so a database leak cannot be used to take over an account.
+model PasswordReset {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  ipAddress String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@map("password_resets")
+}
+
+/// TOTP is MANDATORY for SUPER_ADMIN and FINANCE (§17.6). The secret is stored
+/// encrypted at rest; only the hash of the last accepted code is kept to prevent
+/// replay.
+model TotpCredential {
+  id              String    @id @default(cuid())
+  userId          String    @unique
+  encryptedSecret String    @db.Text
+  lastUsedCodeHash String?
+  confirmedAt     DateTime?
+  createdAt       DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("totp_credentials")
+}
+
+/// Append-only (§6 rule 7). There is no update path and no delete path in the
+/// application layer. Sensitive READS are logged, not just writes.
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorId    String?
+  actorRole  Role?
+  action     String
+  entity     String
+  entityId   String?
+  /// Structured before/after. Never stores a secret or a full card number.
+  metadata   Json?
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([entity, entityId])
+  @@index([actorId, createdAt])
+  @@index([action, createdAt])
+  @@map("audit_logs")
+}
+
+// -----------------------------------------------------------------------------
+// Catalogue (§14.3, §11)
+// -----------------------------------------------------------------------------
+
+model Category {
+  id        String   @id @default(cuid())
+  slug      String   @unique
+  label     String
+  blurb     String   @db.Text
+  vertical  String
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  products Product[]
+
+  @@map("categories")
+}
+
+model Supplier {
+  id           String   @id @default(cuid())
+  legalName    String
+  contactEmail String?
+  /// Agreement type, e.g. "Authorized reseller", "Referral arrangement".
+  agreementType String
+  /// Restricted to the `suppliers:read-cost` scope; never in a public payload
+  /// (§6 rule 14).
+  notes        String?  @db.Text
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  evidence AuthorizationEvidence[]
+  products Product[]
+
+  @@map("suppliers")
+}
+
+/// §11.2 / §11.6 — the evidence that makes a listing sellable. Expiry is what
+/// auto-unpublishes a product, and the absence of a valid record is what makes
+/// Turnitin permanently unpurchasable.
+model AuthorizationEvidence {
+  id          String   @id @default(cuid())
+  supplierId  String?
+  productId   String?
+  /// Private-bucket object key. Released only via short-lived signed URL.
+  documentKey String
+  kind        String
+  issuedAt    DateTime
+  expiresAt   DateTime?
+  /// True once a human has reviewed and accepted the document.
+  verified    Boolean  @default(false)
+  verifiedById String?
+  verifiedAt  DateTime?
+  notes       String?  @db.Text
+  createdAt   DateTime @default(now())
+
+  supplier Supplier? @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  product  Product?  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId, expiresAt])
+  @@index([expiresAt, verified])
+  @@map("authorization_evidence")
+}
+
+model Product {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  name        String
+  provider    String
+  shortDescription String
+  description String   @db.Text
+  categorySlug String
+  /// Brand vertical (AI / ACADEMIC / PRO / SERVICES / STUDENT) — §4.
+  vertical    String
+  offeringType OfferingType
+  /// Customer-facing "what you receive" statement (§11.7).
+  disclosureText String @db.Text
+  authorizationStatus AuthorizationStatus
+  relationshipLabel String
+  licenceType LicenceType
+  eligibilityNote String?
+  geographicRestrictions String?
+  deliveryMethod DeliveryMethod
+  deliverySlaHours Int    @default(0)
+  refundEligibility RefundEligibility
+  activationGuide Json?
+  renewalCapability RenewalCapability
+  renewalNote String?
+  platforms   Json?
+  supplierId  String?
+  /// COGS in poisha. Restricted to `suppliers:read-cost` (§6 rule 14).
+  costPoisha  Int?
+  isFeatured  Boolean  @default(false)
+  isTrending  Boolean  @default(false)
+  isBestseller Boolean @default(false)
+  isStudentEligible Boolean @default(false)
+  status      PublishStatus @default(DRAFT)
+  /// Display hints only — never business data.
+  accentHue   String   @default("243")
+  monogram    String   @default("??")
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  /// §6 rule 11: soft delete. Orders keep referencing the row.
+  deletedAt   DateTime?
+
+  category Category    @relation(fields: [categorySlug], references: [slug], onDelete: Restrict)
+  supplier Supplier?   @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  plans    ProductPlan[]
+  features ProductFeature[]
+  faqs     ProductFaq[]
+  evidence AuthorizationEvidence[]
+  codeVault CodeVaultItem[]
+  orderLines OrderLine[]
+  bundleItems BundleItem[]
+  subscriptions Subscription[]
+
+  @@index([status, categorySlug])
+  @@index([vertical, status])
+  @@index([authorizationStatus, status])
+  @@index([deletedAt])
+  @@map("products")
+}
+
+model ProductPlan {
+  id           String   @id @default(cuid())
+  productId    String
+  sku          String   @unique
+  label        String
+  durationDays Int
+  /// INTEGER POISHA. Never Float/Decimal (§1.1).
+  pricePoisha  Int
+  compareAtPoisha Int?
+  studentPricePoisha Int?
+  couponEligible Boolean @default(true)
+  /// Who this price is for. JetBrains sells Education and Individual at the
+  /// same duration for different prices, so monthly-rate comparisons are only
+  /// meaningful within one audience.
+  audience     PlanAudience @default(STANDARD)
+  inventoryMode InventoryMode @default(UNLIMITED)
+  active       Boolean  @default(true)
+  sortOrder    Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  product    Product     @relation(fields: [productId], references: [id], onDelete: Restrict)
+  codeVault  CodeVaultItem[]
+  orderLines OrderLine[]
+  bundleItems BundleItem[]
+
+  @@index([productId, active])
+  @@index([sku])
+  @@map("product_plans")
+}
+
+model ProductFeature {
+  id        String  @id @default(cuid())
+  productId String
+  label     String
+  sortOrder Int     @default(0)
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+  @@map("product_features")
+}
+
+model ProductFaq {
+  id        String @id @default(cuid())
+  productId String
+  question  String
+  answer    String @db.Text
+  sortOrder Int    @default(0)
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+  @@map("product_faqs")
+}
+
+/// §6 rule 8 / §11.8 — the code vault. A code is RESERVED inside the same
+/// transaction that creates the order line, so two concurrent checkouts cannot
+/// claim the same code (mandatory test #21: last-item race).
+model CodeVaultItem {
+  id         String     @id @default(cuid())
+  productId  String
+  planId     String
+  /// Encrypted at rest. Never logged, never returned in a list payload.
+  ciphertext String     @db.Text
+  codeHash   String     @unique
+  status     CodeStatus @default(AVAILABLE)
+  reservedAt DateTime?
+  assignedAt DateTime?
+  expiresAt  DateTime?
+  createdAt  DateTime   @default(now())
+
+  product  Product     @relation(fields: [productId], references: [id], onDelete: Restrict)
+  plan     ProductPlan @relation(fields: [planId], references: [id], onDelete: Restrict)
+  orderLines OrderLine[]
+
+  @@index([planId, status])
+  @@map("code_vault_items")
+}
+
+// -----------------------------------------------------------------------------
+// Bundles & coupons (§11.5, §13.8)
+// -----------------------------------------------------------------------------
+
+model Bundle {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  name        String
+  description String   @db.Text
+  vertical    String
+  pricePoisha Int
+  compareAtPoisha Int
+  isStudentOnly Boolean @default(false)
+  status      PublishStatus @default(DRAFT)
+  startsAt    DateTime?
+  endsAt      DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  items      BundleItem[]
+  orderLines OrderLine[]
+
+  @@index([status])
+  @@map("bundles")
+}
+
+model BundleItem {
+  id       String @id @default(cuid())
+  bundleId String
+  itemType String
+  sku      String
+  label    String
+  /// Standalone value in poisha, snapshotted when the bundle is composed.
+  valuePoisha Int
+  planId   String?
+  productId String?
+  sortOrder Int   @default(0)
+
+  bundle  Bundle       @relation(fields: [bundleId], references: [id], onDelete: Cascade)
+  plan    ProductPlan? @relation(fields: [planId], references: [id], onDelete: Restrict)
+  product Product?     @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@unique([bundleId, sku])
+  @@map("bundle_items")
+}
+
+model Coupon {
+  id            String   @id @default(cuid())
+  code          String   @unique
+  description   String?
+  /// Either a percentage in basis points or a fixed poisha amount — never both.
+  basisPoints   Int?
+  fixedPoisha   Int?
+  minCartPoisha Int?
+  maxDiscountPoisha Int?
+  /// §13.8 step 4 — applied last, on the already-discounted amount.
+  usageLimit    Int?
+  usageLimitPerUser Int?
+  usedCount     Int      @default(0)
+  startsAt      DateTime?
+  endsAt        DateTime?
+  active        Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  redemptions CouponRedemption[]
+
+  @@index([code, active])
+  @@map("coupons")
+}
+
+model CouponRedemption {
+  id        String   @id @default(cuid())
+  couponId  String
+  userId    String?
+  orderId   String?
+  amountPoisha Int
+  createdAt DateTime @default(now())
+
+  coupon Coupon @relation(fields: [couponId], references: [id], onDelete: Cascade)
+
+  @@index([couponId, userId])
+  @@map("coupon_redemptions")
+}
+
+// -----------------------------------------------------------------------------
+// Orders, payments, refunds (§14.4, §15)
+// -----------------------------------------------------------------------------
+
+model Order {
+  id        String      @id @default(cuid())
+  /// Human-readable, non-enumerable: ORD-YYYYMMDD-XXXXXX.
+  reference String      @unique
+  userId    String?
+  /// §15.3 — DERIVED by one function from payment + fulfilment state. Never
+  /// written directly by a caller.
+  status    OrderStatus @default(DRAFT)
+  currency  String      @default("BDT")
+  subtotalPoisha Int    @default(0)
+  discountPoisha Int    @default(0)
+  vatRateBp Int         @default(0)
+  vatPoisha Int         @default(0)
+  totalPoisha Int       @default(0)
+  couponCode String?
+  /// Guest checkout contact snapshot, immutable with the order.
+  contactEmail String?
+  contactPhone String?
+  /// Declaration for service lines (§12.6): timestamp + IP.
+  integrityAcknowledgedAt DateTime?
+  integrityIpAddress String?
+  ipAddress String?
+  userAgent String?
+  placedAt  DateTime?
+  completedAt DateTime?
+  cancelledAt DateTime?
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  /// Set when this order pays for a service request (Vertical B). The FK lives
+  /// here so the relation is one-to-one from the "one" side.
+  serviceRequestId String? @unique
+  user      User?       @relation(fields: [userId], references: [id], onDelete: Restrict)
+  serviceRequest ServiceRequest? @relation(fields: [serviceRequestId], references: [id], onDelete: Restrict)
+  lines     OrderLine[]
+  payments  Payment[]
+  refunds   Refund[]
+  events    OrderEvent[]
+  invoice   Invoice?
+  fulfillments FulfillmentJob[]
+
+  @@index([userId, status])
+  @@index([status, createdAt])
+  @@index([reference])
+  @@map("orders")
+}
+
+/// IMMUTABLE SNAPSHOT (§6 rule 2, mandatory test #6). Copies the product name,
+/// SKU, unit price and the full discount ladder as they were at purchase time.
+model OrderLine {
+  id        String  @id @default(cuid())
+  orderId   String
+  productId String?
+  planId    String?
+  bundleId  String?
+  codeVaultItemId String?
+  sku       String
+  /// Name as displayed at purchase — survives a later product rename or delete.
+  productName String
+  planLabel String?
+  offeringType OfferingType
+  quantity  Int     @default(1)
+  unitListPoisha Int
+  unitCompareAtPoisha Int?
+  basePoisha Int
+  discountPoisha Int @default(0)
+  finalPoisha Int
+  /// The ordered discount steps, e.g.
+  /// [{type:"BUNDLE",label:"...",amountPoisha:1000},...]
+  discountSteps Json?
+  vatPoisha Int   @default(0)
+  renewalCapability RenewalCapability
+  refundEligibility RefundEligibility
+  deliverySlaHours Int @default(0)
+  createdAt DateTime @default(now())
+
+  order     Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product   Product?       @relation(fields: [productId], references: [id], onDelete: Restrict)
+  plan      ProductPlan?   @relation(fields: [planId], references: [id], onDelete: Restrict)
+  bundle    Bundle?        @relation(fields: [bundleId], references: [id], onDelete: Restrict)
+  codeVaultItem CodeVaultItem? @relation(fields: [codeVaultItemId], references: [id], onDelete: Restrict)
+  fulfillments FulfillmentJob[]
+
+  @@index([orderId])
+  @@index([productId])
+  @@map("order_lines")
+}
+
+/// §15.1. Only a transition INTO `SUCCEEDED`, verified against the gateway's
+/// server-to-server callback, may enqueue fulfilment — inside the same
+/// transaction (§6 rule 4).
+model Payment {
+  id        String        @id @default(cuid())
+  orderId   String
+  provider  PaymentProvider
+  status    PaymentStatus @default(INITIATED)
+  /// Gateway session / transaction id. Unique per provider so a replayed
+  /// callback cannot create a second payment row.
+  providerTransactionId String?
+  amountPoisha Int
+  currency  String        @default("BDT")
+  /// What the gateway says it collected — compared against `amountPoisha`
+  /// before SUCCEEDED is allowed (mandatory test #10: amount mismatch).
+  providerAmountPoisha Int?
+  /// HMAC signature verification result (mandatory test #9).
+  signatureValid Boolean?
+  initiatedAt DateTime    @default(now())
+  succeededAt DateTime?
+  failedAt    DateTime?
+  expiresAt   DateTime?
+  /// Raw callback, retained for audit. Never contains card/PIN/OTP because we
+  /// never collect them (§19.4).
+  rawCallback Json?
+  failureReason String?
+
+  order   Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  refunds Refund[]
+
+  @@unique([provider, providerTransactionId])
+  @@index([orderId, status])
+  @@index([status, expiresAt])
+  @@map("payments")
+}
+
+/// §13.14. A refund writes a ledger entry and reduces net revenue in the period
+/// it is issued (mandatory test #5).
+model Refund {
+  id        String   @id @default(cuid())
+  orderId   String
+  paymentId String
+  amountPoisha Int
+  reason    String
+  requestedById String?
+  approvedById String?
+  status    String   @default("REQUESTED")
+  providerRefundId String?
+  requestedAt DateTime @default(now())
+  approvedAt DateTime?
+  processedAt DateTime?
+  /// Over-refund guard (mandatory test #22): the sum of refunds on a payment can
+  /// never exceed its amount. Enforced in the service layer inside a
+  /// transaction, and asserted by verify-financials.
+  notes     String?  @db.Text
+
+  order   Order   @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  payment Payment @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  ledgerEntries LedgerEntry[]
+
+  @@index([orderId])
+  @@index([paymentId])
+  @@map("refunds")
+}
+
+/// APPEND-ONLY (§6 rule 10). `verify-financials` recomputes Gross, Net and
+/// Contribution Margin from these rows and asserts the stored report figures
+/// match to the poisha.
+model LedgerEntry {
+  id        String          @id @default(cuid())
+  /// Idempotency key — a replayed webhook cannot double-post (§6 rule 5).
+  idempotencyKey String     @unique
+  orderId   String?
+  refundId  String?
+  kind      LedgerKind
+  direction LedgerDirection
+  amountPoisha Int
+  currency  String          @default("BDT")
+  /// Period the entry belongs to, for reporting without a full scan.
+  period    String
+  memo      String?
+  createdAt DateTime        @default(now())
+
+  refund Refund? @relation(fields: [refundId], references: [id], onDelete: Restrict)
+
+  @@index([kind, period])
+  @@index([orderId])
+  @@index([period, direction])
+  @@map("ledger_entries")
+}
+
+/// Every order transition writes one of these (§15.3), so an order's history is
+/// reconstructable even after its status changes many times.
+model OrderEvent {
+  id        String   @id @default(cuid())
+  orderId   String
+  fromStatus OrderStatus?
+  toStatus  OrderStatus
+  reason    String?
+  actorId   String?
+  createdAt DateTime @default(now())
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId, createdAt])
+  @@map("order_events")
+}
+
+model Invoice {
+  id        String   @id @default(cuid())
+  orderId   String   @unique
+  /// VAT-compliant number, issued once and never renumbered (mandatory test
+  /// #28: regeneration must produce the same figures).
+  number    String   @unique
+  issuedAt  DateTime @default(now())
+  /// Private-bucket key of the rendered PDF.
+  documentKey String?
+  subtotalPoisha Int
+  vatPoisha Int
+  totalPoisha Int
+  currency  String   @default("BDT")
+  /// Regenerating an invoice must recompute from the immutable order lines and
+  /// produce identical figures — it must never re-read catalogue prices.
+  regeneratedAt DateTime?
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@map("invoices")
+}
+
+// -----------------------------------------------------------------------------
+// Fulfilment (§14.5, §15.2)
+// -----------------------------------------------------------------------------
+
+/// Claimed atomically with `SELECT ... FOR UPDATE SKIP LOCKED` so two workers
+/// cannot deliver the same line twice. Killing a worker mid-fulfilment must
+/// leave the job recoverable (mandatory test #27).
+model FulfillmentJob {
+  id        String            @id @default(cuid())
+  orderId   String
+  orderLineId String
+  /// Deterministic key derived from the order line — a replayed payment
+  /// callback produces the same key and is rejected (§6 rule 5).
+  idempotencyKey String       @unique
+  kind      String
+  status    FulfillmentStatus @default(QUEUED)
+  attempts  Int               @default(0)
+  maxAttempts Int             @default(5)
+  /// Set while PROCESSING; a worker that dies leaves it stale and the sweeper
+  /// re-queues the job (§6 rule 9).
+  lockedBy  String?
+  lockedAt  DateTime?
+  availableAt DateTime        @default(now())
+  deliveredAt DateTime?
+  lastError String?
+  /// What was actually delivered — a code reference, an API entitlement id, or
+  /// a private-bucket file key. Never the plaintext code.
+  resultRef String?
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  order     Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderLine OrderLine @relation(fields: [orderLineId], references: [id], onDelete: Cascade)
+
+  @@index([status, availableAt])
+  @@index([orderId])
+  @@map("fulfillment_jobs")
+}
+
+/// Duplicate-callback protection (§6 rule 5, mandatory test #1). The provider
+/// event id is unique, so a 5× replay produces one fulfilment.
+model WebhookEvent {
+  id             String   @id @default(cuid())
+  provider       PaymentProvider
+  providerEventId String
+  /// Stored so a replay is detectable even if the payload differs.
+  payloadHash    String
+  payload        Json?
+  receivedAt     DateTime @default(now())
+  processedAt    DateTime?
+  /// Acknowledged within 5s (§18.1): heavy work is queued, not done inline.
+  ackMs          Int?
+  error          String?
+
+  @@unique([provider, providerEventId])
+  @@index([receivedAt, processedAt])
+  @@map("webhook_events")
+}
+
+/// §6 rule 8 — every file release is a short-lived signed URL from a private
+/// bucket, and every download is logged (mandatory test #7: one customer cannot
+/// download another customer's file).
+model DownloadLog {
+  id         String   @id @default(cuid())
+  userId     String
+  orderLineId String?
+  documentKey String
+  ipAddress  String?
+  userAgent  String?
+  expiresAt  DateTime
+  downloadedAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, downloadedAt])
+  @@index([documentKey])
+  @@map("download_logs")
+}
+
+// -----------------------------------------------------------------------------
+// Subscriptions & reminders (§13.11, §6 rule 9)
+// -----------------------------------------------------------------------------
+
+model Subscription {
+  id        String   @id @default(cuid())
+  userId    String
+  productId String
+  orderLineId String?
+  status    String   @default("ACTIVE")
+  startedAt DateTime
+  /// UTC. Reminder sweeps run in UTC with catch-up after downtime (§6 rule 9).
+  expiresAt DateTime
+  renewalCapability RenewalCapability
+  autoRenew Boolean  @default(false)
+  lastReminderSentAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+  reminders RenewalReminder[]
+
+  @@index([userId, status])
+  @@index([expiresAt])
+  @@map("subscriptions")
+}
+
+/// Deduplicated: one reminder per subscription per threshold (mandatory test
+/// #25 — a worker restart must not send the same reminder twice).
+model RenewalReminder {
+  id             String   @id @default(cuid())
+  subscriptionId String
+  /// e.g. "T-30", "T-7", "T-1", "EXPIRED".
+  threshold      String
+  channel        String   @default("EMAIL")
+  sentAt         DateTime @default(now())
+  openedAt       DateTime?
+  error          String?
+
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@unique([subscriptionId, threshold, channel])
+  @@map("renewal_reminders")
+}
+
+// -----------------------------------------------------------------------------
+// Services — Vertical B (§12)
+// -----------------------------------------------------------------------------
+
+model Service {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  name        String
+  categoryLabel String
+  shortDescription String
+  description String   @db.Text
+  vertical    String
+  /// §12.6 — the permitted/prohibited boundary, stored with the service so the
+  /// declaration the customer acknowledges is the one that was actually shown.
+  scopeIncluded Json?
+  scopeExcluded Json?
+  integrityNotice String @db.Text
+  pricingModel ServicePricingModel @default(FIXED)
+  basePricePoisha Int?
+  unitLabel   String?
+  turnaroundDays Int
+  revisionsIncluded Int   @default(1)
+  requiresQuotation Boolean @default(true)
+  status      PublishStatus @default(DRAFT)
+  accentHue   String   @default("160")
+  monogram    String   @default("SV")
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  packages ServicePackage[]
+  requests ServiceRequest[]
+
+  @@index([status])
+  @@map("services")
+}
+
+model ServicePackage {
+  id        String @id @default(cuid())
+  serviceId String
+  sku       String @unique
+  label     String
+  scope     Json?
+  pricePoisha Int
+  turnaroundDays Int
+  revisionsIncluded Int @default(1)
+  unitLabel String?
+  active    Boolean @default(true)
+  sortOrder Int     @default(0)
+
+  service  Service          @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  requests ServiceRequest[]
+
+  @@index([serviceId, active])
+  @@map("service_packages")
+}
+
+model ServiceRequest {
+  id        String   @id @default(cuid())
+  /// SR-YYYYMMDD-XXXXXX — non-enumerable suffix (§19).
+  reference String   @unique
+  serviceId String
+  packageId String?
+  userId    String?
+  status    ServiceRequestStatus @default(SUBMITTED)
+  contactName String
+  contactEmail String
+  contactPhone String?
+  institution String?
+  deadline  DateTime?
+  brief     String   @db.Text
+  /// §12.6 — mandatory. Stored with timestamp and IP; a request without it is
+  /// rejected at the API (mandatory test #26).
+  integrityAcknowledged Boolean @default(false)
+  integrityAcknowledgedAt DateTime?
+  integrityIpAddress String?
+  integrityUserAgent String?
+  /// Flags matched by the prohibited-scope screen. A non-empty list routes the
+  /// request to INTEGRITY_REVIEW before any quotation.
+  matchedFlags Json?
+  reviewedById String?
+  reviewedAt  DateTime?
+  declineReason String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  service  Service         @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+  package  ServicePackage? @relation(fields: [packageId], references: [id], onDelete: Restrict)
+  user     User?           @relation(fields: [userId], references: [id], onDelete: Restrict)
+  quotes   ServiceQuote[]
+  milestones ServiceMilestone[]
+  order    Order?
+
+  @@index([status, createdAt])
+  @@index([serviceId])
+  @@map("service_requests")
+}
+
+/// IMMUTABLE once accepted (§15.4). Price, turnaround and revision allowance do
+/// not change after acceptance; a lapsed quote is re-issued as a new row.
+model ServiceQuote {
+  id        String   @id @default(cuid())
+  requestId String
+  version   Int      @default(1)
+  pricePoisha Int
+  vatPoisha Int    @default(0)
+  turnaroundDays Int
+  revisionsIncluded Int
+  scopeSummary String @db.Text
+  status    String   @default("ISSUED")
+  issuedAt  DateTime @default(now())
+  expiresAt DateTime
+  acceptedAt DateTime?
+  createdAt DateTime @default(now())
+
+  request ServiceRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  @@index([requestId, version])
+  @@index([status, expiresAt])
+  @@map("service_quotes")
+}
+
+model ServiceMilestone {
+  id        String   @id @default(cuid())
+  requestId String
+  label     String
+  amountPoisha Int
+  status    String   @default("PENDING")
+  dueAt     DateTime?
+  deliveredAt DateTime?
+  sortOrder Int      @default(0)
+
+  request ServiceRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  @@index([requestId, status])
+  @@map("service_milestones")
+}
+
+// -----------------------------------------------------------------------------
+// Student verification (§13.12)
+// -----------------------------------------------------------------------------
+
+model StudentVerification {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  method    String
+  institution String?
+  /// Private-bucket key. Deleted after the decision is made; only the outcome
+  /// and expiry survive (§Privacy retention).
+  documentKey String?
+  status    VerificationStatus @default(PENDING)
+  issuedAt  DateTime?
+  expiresAt DateTime?
+  reviewedById String?
+  reviewedAt DateTime?
+  rejectionReason String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([status, expiresAt])
+  @@map("student_verifications")
+}
+
+// -----------------------------------------------------------------------------
+// Support (§13.19)
+// -----------------------------------------------------------------------------
+
+model Ticket {
+  id        String   @id @default(cuid())
+  reference String   @unique
+  userId    String?
+  orderId   String?
+  subject   String
+  status    TicketStatus @default(OPEN)
+  priority  TicketPriority @default(NORMAL)
+  assignedToId String?
+  /// SLA clock — first response and resolution targets (§13.19).
+  firstResponseDueAt DateTime?
+  firstResponseAt DateTime?
+  resolutionDueAt DateTime?
+  resolvedAt DateTime?
+  closedAt  DateTime?
+  csatScore Int?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user     User?          @relation(fields: [userId], references: [id], onDelete: Restrict)
+  messages TicketMessage[]
+
+  @@index([status, priority])
+  @@index([userId])
+  @@map("tickets")
+}
+
+model TicketMessage {
+  id       String   @id @default(cuid())
+  ticketId String
+  authorId String?
+  /// CUSTOMER / AGENT / SYSTEM.
+  authorKind String
+  body     String   @db.Text
+  /// Stored sanitised; rendered escaped (mandatory test #23: XSS).
+  createdAt DateTime @default(now())
+
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId, createdAt])
+  @@map("ticket_messages")
+}
+
+// -----------------------------------------------------------------------------
+// Affiliates & payouts (§13.20 — launch wave 3)
+// -----------------------------------------------------------------------------
+
+model Affiliate {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  code      String   @unique
+  /// Basis points of the qualifying order value (D11 — rate not yet decided).
+  commissionBp Int   @default(0)
+  status    String   @default("PENDING")
+  createdAt DateTime @default(now())
+
+  user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  referrals AffiliateReferral[]
+  payouts   Payout[]
+
+  @@map("affiliates")
+}
+
+model AffiliateReferral {
+  id          String   @id @default(cuid())
+  affiliateId String
+  orderId     String?
+  /// Commission is computed on NET revenue after refunds, not gross, so a
+  /// refunded order cannot generate a payout.
+  commissionPoisha Int @default(0)
+  status      String   @default("PENDING")
+  createdAt   DateTime @default(now())
+
+  affiliate Affiliate @relation(fields: [affiliateId], references: [id], onDelete: Cascade)
+
+  @@index([affiliateId, status])
+  @@map("affiliate_referrals")
+}
+
+model Payout {
+  id          String   @id @default(cuid())
+  affiliateId String?
+  amountPoisha Int
+  method      String
+  status      PayoutStatus @default(PENDING)
+  /// Batch approval is dual-control: a second approval must not double-pay
+  /// (mandatory test #26 area).
+  requestedById String?
+  approvedById String?
+  approvedAt  DateTime?
+  paidAt      DateTime?
+  reference   String?
+  createdAt   DateTime @default(now())
+
+  affiliate Affiliate? @relation(fields: [affiliateId], references: [id], onDelete: Restrict)
+
+  @@index([status, createdAt])
+  @@map("payouts")
+}
+
+// -----------------------------------------------------------------------------
+// Wishlist & notification preferences (§13.18)
+// -----------------------------------------------------------------------------
+
+model WishlistItem {
+  id        String   @id @default(cuid())
+  userId    String
+  productId String
+  /// Alert the customer when this becomes purchasable or drops in price.
+  notifyOnAvailable Boolean @default(true)
+  notifyOnPriceDrop Boolean @default(true)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, productId])
+  @@map("wishlist_items")
+}
+
+// -----------------------------------------------------------------------------
+// Site content (§13.17)
+// -----------------------------------------------------------------------------
+
+model Faq {
+  id        String  @id @default(cuid())
+  question  String
+  answer    String  @db.Text
+  category  String?
+  sortOrder Int     @default(0)
+  published Boolean @default(true)
+
+  @@map("faqs")
+}
+
+model Announcement {
+  id        String   @id @default(cuid())
+  text      String
+  href      String
+  ctaLabel  String
+  active    Boolean  @default(true)
+  startsAt  DateTime?
+  endsAt    DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([active, startsAt, endsAt])
+  @@map("announcements")
+}
+
+model LegalDocument {
+  id        String   @id @default(cuid())
+  slug      String   @unique
+  title     String
+  body      Json
+  version   Int      @default(1)
+  publishedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("legal_documents")
+}
+
+/// Testimonials are shown only when `verified` is true and tied to a completed
+/// order (§9.1.2, §28.5 — no fake reviews).
+model Testimonial {
+  id        String   @id @default(cuid())
+  orderId   String?
+  quote     String   @db.Text
+  name      String
+  role      String?
+  verified  Boolean  @default(false)
+  approvedById String?
+  createdAt DateTime @default(now())
+
+  @@index([verified])
+  @@map("testimonials")
+}

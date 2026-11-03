@@ -1,0 +1,219 @@
+# =============================================================================
+# {{BRAND_NAME}} — local & single-host deployment stack
+#
+# Portable Docker-first (spec §17.1, decision D-infrastructure): no
+# vendor-specific runtime APIs. Every external dependency is reached through an
+# adapter, so this same image runs on Azure Container Apps, Fly.io, Railway, a
+# single VPS, or Vercel + a separate worker.
+#
+#   docker compose up -d              # postgres + redis + web + worker
+#   docker compose logs -f web        # follow the storefront
+#   docker compose exec web npm run verify-financials
+#   docker compose down               # stop (data volumes are kept)
+#   docker compose down -v            # stop AND destroy the database
+#
+# Health: http://localhost:3000/api/v1/health
+# =============================================================================
+
+name: marketplace
+
+x-web-env: &web-env
+  NODE_ENV: production
+  PORT: "3000"
+  HOSTNAME: "0.0.0.0"
+  # --- Data ---
+  DATA_ADAPTER: prisma
+  DATABASE_URL: postgresql://${POSTGRES_USER:-marketplace}:${POSTGRES_PASSWORD:-marketplace}@postgres:5432/${POSTGRES_DB:-marketplace}?schema=public
+  REDIS_URL: redis://redis:6379
+  # --- Brand (D15 gate: do not set BRAND_CLEARED=true until cleared) ---
+  BRAND_NAME: ${BRAND_NAME:-Scholarix}
+  BRAND_SLUG: ${BRAND_SLUG:-marketplace}
+  BRAND_TAGLINE: ${BRAND_TAGLINE:-Think Smarter. Achieve More.}
+  BRAND_CLEARED: ${BRAND_CLEARED:-false}
+  # --- Runtime ---
+  NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:-http://localhost:3000}
+  NEXT_PUBLIC_ROBOTS_INDEX: ${NEXT_PUBLIC_ROBOTS_INDEX:-false}
+  DEMO_MODE: ${DEMO_MODE:-true}
+  FEATURE_I18N_BN: ${FEATURE_I18N_BN:-false}
+  # --- Auth (§17.6). AUTH_SECRET: openssl rand -base64 32 ---
+  AUTH_SECRET: ${AUTH_SECRET:-}
+  AUTH_URL: ${AUTH_URL:-http://localhost:3000}
+  SESSION_IDLE_HOURS_CUSTOMER: "24"
+  SESSION_IDLE_HOURS_ADMIN: "8"
+  SESSION_ABSOLUTE_DAYS: "30"
+  # --- Money ---
+  VAT_RATE_BP: ${VAT_RATE_BP:-0}
+  STUDENT_DISCOUNT_BP: ${STUDENT_DISCOUNT_BP:-1000}
+  PRICE_FLOOR_POISHA: ${PRICE_FLOOR_POISHA:-0}
+  # --- Payments (leave unset in local dev; checkout then refuses honestly) ---
+  SSLCOMMERZ_STORE_ID: ${SSLCOMMERZ_STORE_ID:-}
+  SSLCOMMERZ_STORE_PASSWORD: ${SSLCOMMERZ_STORE_PASSWORD:-}
+  SSLCOMMERZ_IS_SANDBOX: ${SSLCOMMERZ_IS_SANDBOX:-true}
+  BKASH_APP_KEY: ${BKASH_APP_KEY:-}
+  BKASH_APP_SECRET: ${BKASH_APP_SECRET:-}
+  BKASH_USERNAME: ${BKASH_USERNAME:-}
+  BKASH_PASSWORD: ${BKASH_PASSWORD:-}
+  NAGAD_MERCHANT_ID: ${NAGAD_MERCHANT_ID:-}
+  NAGAD_PRIVATE_KEY: ${NAGAD_PRIVATE_KEY:-}
+  NAGAD_PG_PUBLIC_KEY: ${NAGAD_PG_PUBLIC_KEY:-}
+  # --- Storage / mail / observability ---
+  S3_ENDPOINT: ${S3_ENDPOINT:-}
+  S3_REGION: ${S3_REGION:-}
+  S3_BUCKET_PRIVATE: ${S3_BUCKET_PRIVATE:-}
+  S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
+  S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
+  SIGNED_URL_TTL_SECONDS: "300"
+  SMTP_HOST: ${SMTP_HOST:-mailpit}
+  SMTP_PORT: ${SMTP_PORT:-1025}
+  SMTP_USER: ${SMTP_USER:-}
+  SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+  MAIL_FROM: ${MAIL_FROM:-no-reply@marketplace.local}
+  SENTRY_DSN: ${SENTRY_DSN:-}
+  OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+
+services:
+  # ---------------------------------------------------------------------------
+  # PostgreSQL — the system of record for orders, the ledger and the audit log.
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-marketplace}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-marketplace}
+      POSTGRES_DB: ${POSTGRES_DB:-marketplace}
+      # UTC everywhere (§6 rule 12). Display-time conversion is a view concern.
+      TZ: UTC
+      PGTZ: UTC
+    command:
+      - postgres
+      - -c
+      - shared_buffers=256MB
+      - -c
+      - max_connections=100
+      - -c
+      - log_min_duration_statement=200
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-marketplace} -d ${POSTGRES_DB:-marketplace}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    ports:
+      # Bound to loopback only — never expose Postgres publicly.
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+
+  # ---------------------------------------------------------------------------
+  # Redis — BullMQ queues plus rate limiting and webhook idempotency cache.
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
+
+  # ---------------------------------------------------------------------------
+  # Web — Next.js storefront, dashboards and the /api/v1 surface.
+  # ---------------------------------------------------------------------------
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      target: runner
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      <<: *web-env
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    healthcheck:
+      # Liveness: 200 or 503 (degraded) both mean "alive". Readiness is decided
+      # by the load balancer from the endpoint body, not by the container state.
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/v1/health').then(r=>process.exit(r.status===200||r.status===503?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+    # §18.1: bounded memory so a leak degrades instead of taking the host down.
+    deploy:
+      resources:
+        limits:
+          memory: 1024M
+    security_opt:
+      - no-new-privileges:true
+
+  # ---------------------------------------------------------------------------
+  # Worker — fulfilment jobs, reminder sweeps, evidence-expiry checks.
+  # Same image, different command: one build artefact, two runtime roles.
+  # ---------------------------------------------------------------------------
+  worker:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      target: runner
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      web:
+        condition: service_started
+    environment:
+      <<: *web-env
+      ROLE: worker
+    # Replace with the worker entrypoint once workers/fulfillment is implemented
+    # (Phase 3). Until then it idles rather than pretending to process jobs.
+    command: ["node", "-e", "console.log('worker: fulfilment entrypoint not implemented yet (Phase 3) — idling'); setInterval(()=>{}, 1<<30)"]
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    security_opt:
+      - no-new-privileges:true
+
+  # ---------------------------------------------------------------------------
+  # Prisma migrations — one-shot, runs before web accepts traffic.
+  # ---------------------------------------------------------------------------
+  migrate:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      target: runner
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      <<: *web-env
+    command: ["node", "-e", "console.log('migrate: run `npx prisma migrate deploy` from packages/database once the Prisma client package is wired (Phase 2)')"]
+    restart: "no"
+    profiles: ["migrate"]
+
+  # ---------------------------------------------------------------------------
+  # Mailpit — local SMTP sink so transactional email can be developed without
+  # a real provider. UI at http://localhost:8025. Dev/staging only.
+  # ---------------------------------------------------------------------------
+  mailpit:
+    image: axllent/mailpit:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${MAILPIT_UI_PORT:-8025}:8025"
+    profiles: ["dev"]
+
+volumes:
+  postgres-data:
+  redis-data:
