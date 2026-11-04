@@ -88,8 +88,8 @@ export default async function ExplorePage({
   searchParams: Promise<ExploreParams>;
 }) {
   const params = await searchParams;
-  const categories = listCategories();
-  const verticals = listVerticals();
+  const categories = await listCategories();
+  const verticals = await listVerticals();
 
   const query = (params.q ?? "").trim();
   const category = params.category;
@@ -100,7 +100,7 @@ export default async function ExplorePage({
   const sort = (SORTS.find((s) => s.key === params.sort)?.key ?? "featured") as SortKey;
   const page = Math.max(1, Number.parseInt(params.page ?? "1", 10) || 1);
 
-  let items = listProductItems();
+  let items = await listProductItems();
 
   if (query) {
     const needle = query.toLowerCase();

@@ -68,7 +68,7 @@ export default async function DashboardPage() {
     countServiceRequests(),
     listServiceRequests(),
   ]);
-  const catalogue = listProductItems();
+  const catalogue = await listProductItems();
   const unavailable = catalogue.filter((item) => item.availability === "UNAVAILABLE");
   const matrix = capabilityMatrix();
 

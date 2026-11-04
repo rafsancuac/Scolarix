@@ -39,7 +39,7 @@ export default async function SearchPage({
   const params = await searchParams;
   const query = (params.q ?? "").trim();
   const hasQuery = query.length > 0;
-  const hits = hasQuery ? search(query, 24) : [];
+  const hits = hasQuery ? (await search(query, 24)) : [];
 
   const productHits = hits
     .filter((hit) => hit.kind === "product")
@@ -51,7 +51,7 @@ export default async function SearchPage({
     .map((hit) => getServiceBySlug(hit.slug))
     .filter((service): service is NonNullable<typeof service> => service !== undefined);
 
-  const categories = listCategories();
+  const categories = await listCategories();
 
   return (
     <div className="container-page py-10 lg:py-14">

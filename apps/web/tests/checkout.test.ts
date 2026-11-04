@@ -15,16 +15,16 @@ import { applyBasisPoints } from "../src/lib/money";
 import { getProductBySlug, listBundles, listProducts } from "../src/lib/repository";
 import type { Bundle, Product } from "../src/lib/types";
 
-function lineFor(slug: string, planIndex = 0): CartLineInput {
-  const product = getProductBySlug(slug);
+async function lineFor(slug: string, planIndex = 0): CartLineInput {
+  const product = await getProductBySlug(slug);
   assert.ok(product, `fixture product ${slug} must exist`);
   const plan = product!.plans.filter((p) => p.active)[planIndex];
   assert.ok(plan, `fixture product ${slug} must have an active plan`);
   return { product: product!, plan: plan!, quantity: 1 };
 }
 
-function purchasableSlug(): string {
-  const product = listProducts().find(
+async function purchasableSlug(): string {
+  const product = (await listProducts()).find(
     (p) => p.status === "PUBLISHED" && p.plans.some((plan) => plan.active),
   );
   assert.ok(product);
@@ -73,8 +73,8 @@ describe("priceCart — line integrity", () => {
 });
 
 describe("priceCart — the compliance gate is enforced at pricing time", () => {
-  it("removes Turnitin from the total and reports it as blocked", () => {
-    const turnitin = getProductBySlug("turnitin");
+  it("removes Turnitin from the total and reports it as blocked", async () => {
+    const turnitin = await getProductBySlug("turnitin");
     assert.ok(turnitin);
     const good = lineFor(purchasableSlug());
 
@@ -106,8 +106,8 @@ describe("priceCart — the compliance gate is enforced at pricing time", () => 
     assert.equal(cart.totalPoisha, good.plan.pricePoisha);
   });
 
-  it("blocks an unpublished product even though it has a valid plan", () => {
-    const source = listProducts().find((p) => p.plans.some((plan) => plan.active));
+  it("blocks an unpublished product even though it has a valid plan", async () => {
+    const source = (await listProducts()).find((p) => p.plans.some((plan) => plan.active));
     const product: Product = { ...source!, status: "DRAFT" };
     const cart = priceCart([
       { product, plan: product.plans.filter((p) => p.active)[0]!, quantity: 1 },
@@ -144,14 +144,14 @@ describe("priceCart — discount ladder (§13.8)", () => {
     );
   });
 
-  it("keeps BUNDLE before STUDENT before COUPON in a multi-discount cart", () => {
+  it("keeps BUNDLE before STUDENT before COUPON in a multi-discount cart", async () => {
     const line = lineFor(purchasableSlug());
 
     // A deliberately small bundle saving, so later ladder steps still have
     // headroom. The real fixture bundles save more than the whole line costs,
     // which correctly drives the total to the floor and suppresses them.
     const bundle: Bundle = {
-      ...listBundles()[0]!,
+      ...(await listBundles())[0]!,
       pricePoisha: line.plan.pricePoisha - 1000,
       compareAtPoisha: line.plan.pricePoisha,
     };
@@ -180,9 +180,9 @@ describe("priceCart — discount ladder (§13.8)", () => {
     assert.equal(cart.totalPoisha, afterStudent - couponAmount);
   });
 
-  it("drives a large real bundle saving to the floor and suppresses later steps", () => {
+  it("drives a large real bundle saving to the floor and suppresses later steps", async () => {
     const line = lineFor(purchasableSlug());
-    const bundle = listBundles()[0];
+    const bundle = (await listBundles())[0];
     assert.ok(bundle);
 
     const cart = priceCart([line], {
@@ -199,8 +199,8 @@ describe("priceCart — discount ladder (§13.8)", () => {
     assert.equal(cart.floorApplied, true);
   });
 
-  it("never lets a coupon apply to a plan marked coupon-ineligible", () => {
-    const source = listProducts().find((p) =>
+  it("never lets a coupon apply to a plan marked coupon-ineligible", async () => {
+    const source = (await listProducts()).find((p) =>
       p.plans.some((plan) => plan.active && plan.couponEligible === false),
     );
     assert.ok(source, "the fixture catalogue must contain a coupon-ineligible plan");

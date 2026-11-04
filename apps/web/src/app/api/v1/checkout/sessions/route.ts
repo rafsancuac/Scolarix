@@ -77,7 +77,7 @@ export async function POST(request: NextRequest) {
   }
 
   const cart = priceCart(lines, {
-    bundle: bundleSlug ? getBundleBySlug(bundleSlug) : undefined,
+    bundle: bundleSlug ? (await getBundleBySlug(bundleSlug)) : undefined,
     studentVerified: false, // wired to the session's verification state in Phase 3
     studentDiscountBp: 0,
   });

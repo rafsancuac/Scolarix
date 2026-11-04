@@ -38,14 +38,14 @@ export const metadata: Metadata = {
   alternates: { canonical: "/" },
 };
 
-export default function HomePage() {
-  const categories = listCategories();
-  const verticals = listVerticals();
-  const trending = listTrending(6);
-  const services = listServices().slice(0, 3);
-  const bundles = listBundles().slice(0, 2);
-  const faqs = listFaqs();
-  const testimonials = listTestimonials();
+export default async function HomePage() {
+  const categories = await listCategories();
+  const verticals = await listVerticals();
+  const trending = await listTrending(6);
+  const services = (await listServices()).slice(0, 3);
+  const bundles = (await listBundles()).slice(0, 2);
+  const faqs = await listFaqs();
+  const testimonials = await listTestimonials();
 
   return (
     <>
@@ -63,7 +63,7 @@ export default function HomePage() {
         }}
       />
 
-      <Hero trendingCount={trending.length + listServices().length} />
+      <Hero trendingCount={trending.length + (await listServices()).length} />
 
       <Section
         id="categories"

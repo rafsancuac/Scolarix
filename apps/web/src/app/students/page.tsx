@@ -75,10 +75,10 @@ const STUDENT_PERKS = [
   },
 ];
 
-export default function StudentsPage() {
-  const studentItems = listStudentEligible(9);
-  const studentBundles = listBundles().filter((bundle) => bundle.isStudentOnly);
-  const studentFaqs = listFaqs().filter((faq) =>
+export default async function StudentsPage() {
+  const studentItems = await listStudentEligible(9);
+  const studentBundles = (await listBundles()).filter((bundle) => bundle.isStudentOnly);
+  const studentFaqs = (await listFaqs()).filter((faq) =>
     /student|verification|university|\.edu|discount/i.test(`${faq.question} ${faq.answer}`),
   );
 

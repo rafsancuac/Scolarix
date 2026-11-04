@@ -38,7 +38,7 @@ export async function GET() {
 
   const checks = await Promise.all([
     // The catalogue adapter must be readable or no page can render.
-    probe("catalogue", async () => listProducts().length >= 0),
+    probe("catalogue", async () => (await listProducts()).length >= 0),
     ...(DATA_ADAPTER === "prisma"
       ? [
           probe("database", async () => {

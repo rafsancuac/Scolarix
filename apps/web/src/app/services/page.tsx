@@ -42,8 +42,8 @@ const PROHIBITED = [
   "Anything your institution's academic regulations forbid",
 ];
 
-export default function ServicesPage() {
-  const services = listServices();
+export default async function ServicesPage() {
+  const services = await listServices();
 
   return (
     <>

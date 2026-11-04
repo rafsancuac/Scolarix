@@ -16,8 +16,8 @@ import { formatBDT, savingsPercentPoisha, savingsPoisha } from "@/lib/money";
 import { breadcrumbJsonLd } from "@/lib/metadata";
 import { getBundleBySlug, getPlanBySku, listBundles } from "@/lib/repository";
 
-export function generateStaticParams() {
-  return listBundles().map((bundle) => ({ slug: bundle.slug }));
+export async function generateStaticParams() {
+  return (await listBundles()).map((bundle) => ({ slug: bundle.slug }));
 }
 
 export async function generateMetadata({
@@ -26,7 +26,7 @@ export async function generateMetadata({
   params: Promise<{ slug: string }>;
 }): Promise<Metadata> {
   const { slug } = await params;
-  const bundle = getBundleBySlug(slug);
+  const bundle = await getBundleBySlug(slug);
   if (!bundle) return { title: "Bundle not found", robots: { index: false } };
 
   return {
@@ -38,7 +38,7 @@ export async function generateMetadata({
 
 export default async function BundlePage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
-  const bundle = getBundleBySlug(slug);
+  const bundle = await getBundleBySlug(slug);
   if (!bundle) notFound();
 
   const saved = savingsPoisha(bundle.pricePoisha, bundle.compareAtPoisha) ?? 0;

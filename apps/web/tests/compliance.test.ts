@@ -27,8 +27,8 @@ import { PUBLISHABLE_AUTHORIZATION } from "../src/lib/types";
 import type { Product } from "../src/lib/types";
 
 /** Builds a product from a real fixture listing so the shape stays honest. */
-function withOverrides(overrides: Partial<Product>): Product {
-  const base = listProducts()[0];
+async function withOverrides(overrides: Partial<Product>): Product {
+  const base = (await listProducts())[0];
   assert.ok(base, "the fixture catalogue must contain at least one product");
   return { ...base, ...overrides };
 }
@@ -58,13 +58,13 @@ describe("the Turnitin rule (mandatory test #4)", () => {
     assert.equal(availabilityOf(turnitin!), "UNAVAILABLE");
   });
 
-  it("is excluded from every purchasable listing surface", () => {
-    assert.equal(listProductItems({ purchasableOnly: true }).some((i) => i.product.slug === turnitin!.slug), false);
-    assert.equal(listTrending(50).some((i) => i.product.slug === turnitin!.slug), false);
+  it("is excluded from every purchasable listing surface", async () => {
+    assert.equal((await listProductItems({ purchasableOnly: true })).some((i) => i.product.slug === turnitin!.slug), false);
+    assert.equal((await listTrending(50)).some((i) => i.product.slug === turnitin!.slug), false);
   });
 
-  it("still appears in search, because hiding it would be less honest than labelling it", () => {
-    const hits = search("turnitin");
+  it("still appears in search, because hiding it would be less honest than labelling it", async () => {
+    const hits = await search("turnitin");
     assert.ok(hits.some((hit) => hit.slug === turnitin!.slug));
   });
 });
@@ -97,8 +97,8 @@ describe("every §11.2 blocking condition", () => {
     assert.equal(PUBLISHABLE_AUTHORIZATION.includes("EXPIRED_EVIDENCE"), false);
   });
 
-  it("keeps an expired-evidence listing visible in the catalogue but unpurchasable", () => {
-    const source = listProducts().find((p) => isPurchasable(p));
+  it("keeps an expired-evidence listing visible in the catalogue but unpurchasable", async () => {
+    const source = (await listProducts()).find((p) => isPurchasable(p));
     const expired: Product = { ...source!, authorizationStatus: "EXPIRED_EVIDENCE" };
     // Visible: still resolvable by slug and searchable.
     assert.ok(expired.slug);
@@ -156,8 +156,8 @@ describe("every §11.2 blocking condition", () => {
     assert.equal(isPurchasable(product), true);
   });
 
-  it("passes an education referral — no licence is sold, so no plan is required", () => {
-    const referral = listProducts().find((p) => p.offeringType === "EDUCATION_REFERRAL");
+  it("passes an education referral — no licence is sold, so no plan is required", async () => {
+    const referral = (await listProducts()).find((p) => p.offeringType === "EDUCATION_REFERRAL");
     assert.ok(referral, "the catalogue must contain at least one education referral");
     assert.equal(referral!.authorizationStatus, "EDUCATION_REFERRAL");
     assert.equal(isPurchasable(referral!), true);
@@ -188,8 +188,8 @@ describe("availability (§9.2.2)", () => {
     assert.equal(availabilityOf(blocked), "UNAVAILABLE");
   });
 
-  it("reports IN_STOCK when inventory is unlimited", () => {
-    const product = listProducts().find(
+  it("reports IN_STOCK when inventory is unlimited", async () => {
+    const product = (await listProducts()).find(
       (p) => isPurchasable(p) && p.plans.some((plan) => plan.active && plan.inventoryMode === "UNLIMITED"),
     );
     assert.ok(product);
@@ -198,8 +198,8 @@ describe("availability (§9.2.2)", () => {
 
   // Stock is summed across every active tracked plan, so these cases use a
   // single tracked plan to make the arithmetic unambiguous.
-  it("reports UNAVAILABLE when tracked stock is exhausted", () => {
-    const source = listProducts().find((p) => isPurchasable(p));
+  it("reports UNAVAILABLE when tracked stock is exhausted", async () => {
+    const source = (await listProducts()).find((p) => isPurchasable(p));
     const product = withOverrides({
       ...source!,
       plans: [trackedPlan(source!, "TRACKED", 0)],
@@ -207,8 +207,8 @@ describe("availability (§9.2.2)", () => {
     assert.equal(availabilityOf(product), "UNAVAILABLE");
   });
 
-  it("reports LOW_STOCK at or below the threshold", () => {
-    const source = listProducts().find((p) => isPurchasable(p));
+  it("reports LOW_STOCK at or below the threshold", async () => {
+    const source = (await listProducts()).find((p) => isPurchasable(p));
     const product = withOverrides({
       ...source!,
       plans: [trackedPlan(source!, "CODE_VAULT", 3)],
@@ -216,8 +216,8 @@ describe("availability (§9.2.2)", () => {
     assert.equal(availabilityOf(product), "LOW_STOCK");
   });
 
-  it("reports IN_STOCK just above the threshold", () => {
-    const source = listProducts().find((p) => isPurchasable(p));
+  it("reports IN_STOCK just above the threshold", async () => {
+    const source = (await listProducts()).find((p) => isPurchasable(p));
     const product = withOverrides({
       ...source!,
       plans: [trackedPlan(source!, "CODE_VAULT", 6)],
@@ -225,8 +225,8 @@ describe("availability (§9.2.2)", () => {
     assert.equal(availabilityOf(product), "IN_STOCK");
   });
 
-  it("sums stock across plans, so two low plans are not low together", () => {
-    const source = listProducts().find((p) => isPurchasable(p));
+  it("sums stock across plans, so two low plans are not low together", async () => {
+    const source = (await listProducts()).find((p) => isPurchasable(p));
     const product = withOverrides({
       ...source!,
       plans: [trackedPlan(source!, "CODE_VAULT", 3), trackedPlan(source!, "TRACKED", 4, "b")],
@@ -237,17 +237,17 @@ describe("availability (§9.2.2)", () => {
 });
 
 describe("catalogue invariants", () => {
-  it("exposes only published products through the public listing functions", () => {
-    for (const product of listProducts()) {
+  it("exposes only published products through the public listing functions", async () => {
+    for (const product of (await listProducts())) {
       assert.equal(product.status, "PUBLISHED");
     }
-    for (const item of listProductItems()) {
+    for (const item of (await listProductItems())) {
       assert.equal(item.product.status, "PUBLISHED");
     }
   });
 
-  it("gives every purchasable listing a resolvable price and at least one plan", () => {
-    for (const item of listProductItems({ purchasableOnly: true })) {
+  it("gives every purchasable listing a resolvable price and at least one plan", async () => {
+    for (const item of (await listProductItems({ purchasableOnly: true }))) {
       assert.notEqual(item.fromPricePoisha, null);
       assert.ok(item.activePlanCount >= 1);
       assert.ok(Number.isInteger(item.fromPricePoisha!));
@@ -255,10 +255,10 @@ describe("catalogue invariants", () => {
     }
   });
 
-  it("resolves every purchasable plan SKU back to its product", () => {
-    for (const item of listProductItems({ purchasableOnly: true })) {
+  it("resolves every purchasable plan SKU back to its product", async () => {
+    for (const item of (await listProductItems({ purchasableOnly: true }))) {
       for (const plan of item.product.plans.filter((p) => p.active)) {
-        const found = getPlanBySku(plan.sku);
+        const found = await getPlanBySku(plan.sku);
         assert.ok(found, `SKU ${plan.sku} must resolve`);
         assert.equal(found!.product.id, item.product.id);
         assert.equal(found!.plan.id, plan.id);
@@ -266,13 +266,13 @@ describe("catalogue invariants", () => {
     }
   });
 
-  it("keeps SKUs unique across the whole catalogue", () => {
-    const skus = listProducts().flatMap((product) => product.plans.map((plan) => plan.sku));
+  it("keeps SKUs unique across the whole catalogue", async () => {
+    const skus = (await listProducts()).flatMap((product) => product.plans.map((plan) => plan.sku));
     assert.equal(new Set(skus).size, skus.length);
   });
 
-  it("prices every plan in integer poisha", () => {
-    for (const product of listProducts()) {
+  it("prices every plan in integer poisha", async () => {
+    for (const product of (await listProducts())) {
       for (const plan of product.plans) {
         assert.ok(Number.isSafeInteger(plan.pricePoisha), `${plan.sku} price must be an integer`);
         assert.ok(plan.pricePoisha >= 0);
@@ -286,16 +286,16 @@ describe("catalogue invariants", () => {
     }
   });
 
-  it("counts category items consistently with the product listing", () => {
-    const purchasable = listProductItems({ purchasableOnly: true });
-    for (const category of listCategories()) {
+  it("counts category items consistently with the product listing", async () => {
+    const purchasable = await listProductItems({ purchasableOnly: true });
+    for (const category of (await listCategories())) {
       const expected = purchasable.filter((i) => i.product.categorySlug === category.slug).length;
       assert.equal(category.itemCount, expected, `${category.slug} item count`);
     }
   });
 
-  it("carries a sourcing disclosure and relationship label on every listing", () => {
-    for (const product of listProducts()) {
+  it("carries a sourcing disclosure and relationship label on every listing", async () => {
+    for (const product of (await listProducts())) {
       assert.ok(product.disclosureText.length > 20, `${product.slug} needs a real disclosure`);
       assert.ok(product.relationshipLabel.length > 0, `${product.slug} needs a relationship label`);
       assert.ok(product.platforms.length > 0, `${product.slug} must state its platforms`);

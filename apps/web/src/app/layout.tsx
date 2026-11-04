@@ -40,8 +40,8 @@ export const viewport: Viewport = defaultViewport;
  */
 const THEME_SCRIPT = `(function(){try{var t=localStorage.getItem('theme');if(t!=='light'&&t!=='dark'){t='dark';}document.documentElement.dataset.theme=t;}catch(e){document.documentElement.dataset.theme='dark';}})();`;
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
-  const announcement = getAnnouncement();
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const announcement = await getAnnouncement();
 
   return (
     <html lang="en" data-theme="dark" suppressHydrationWarning>

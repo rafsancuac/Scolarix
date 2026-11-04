@@ -14,8 +14,8 @@ export const metadata: Metadata = {
   robots: { index: false, follow: true },
 };
 
-export default function NotFound() {
-  const categories = listCategories();
+export default async function NotFound() {
+  const categories = await listCategories();
 
   return (
     <div className="container-page flex flex-col items-center py-24 text-center">

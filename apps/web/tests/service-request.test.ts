@@ -146,8 +146,8 @@ describe("field validation", () => {
     assert.ok(result.errors.packageId);
   });
 
-  it("accepts a real package belonging to the service", () => {
-    const service = listServices()[0]!;
+  it("accepts a real package belonging to the service", async () => {
+    const service = (await listServices())[0]!;
     const result = validateServiceRequest(validInput({ packageId: service.packages[0]?.id }));
     assert.equal(result.ok, true);
   });
@@ -237,9 +237,9 @@ describe("the stored record", () => {
     assert.ok(record.declaration.ipAddress.length > 0);
   });
 
-  it("resolves the service name from the catalogue, not from the client", () => {
+  it("resolves the service name from the catalogue, not from the client", async () => {
     const record = buildServiceRequest({ input: validInput(), matchedFlags: [] });
-    assert.equal(record.serviceName, listServices()[0]!.name);
+    assert.equal(record.serviceName, (await listServices())[0]!.name);
   });
 });
 

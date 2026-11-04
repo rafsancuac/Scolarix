@@ -59,7 +59,7 @@ export default async function CheckoutPage({
   const skus = (Array.isArray(params.sku) ? params.sku : params.sku ? [params.sku] : []).filter(
     Boolean,
   );
-  const bundle = params.bundle ? getBundleBySlug(params.bundle) : undefined;
+  const bundle = params.bundle ? (await getBundleBySlug(params.bundle)) : undefined;
   const couponCode = params.coupon?.trim().toUpperCase();
 
   // Unknown SKUs are dropped silently: a stale or hand-edited link must not be

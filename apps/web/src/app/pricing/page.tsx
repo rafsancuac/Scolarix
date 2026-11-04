@@ -24,8 +24,8 @@ export const metadata: Metadata = {
   alternates: { canonical: "/pricing" },
 };
 
-export default function PricingPage() {
-  const items = listProductItems().sort((a, b) =>
+export default async function PricingPage() {
+  const items = (await listProductItems()).sort((a, b) =>
     a.product.name.localeCompare(b.product.name),
   );
   const pricedRows = items.filter((item) => item.fromPricePoisha !== null);

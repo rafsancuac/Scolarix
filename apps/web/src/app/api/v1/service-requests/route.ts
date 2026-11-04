@@ -101,7 +101,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const service = getServiceBySlug(input.serviceSlug);
+  const service = await getServiceBySlug(input.serviceSlug);
   if (!service) {
     return NextResponse.json(
       { message: "That service is not available.", code: "SERVICE_NOT_FOUND" },

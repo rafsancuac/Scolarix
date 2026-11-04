@@ -55,8 +55,8 @@ const CHANNELS = [
   },
 ];
 
-export default function SupportPage() {
-  const faqs = listFaqs();
+export default async function SupportPage() {
+  const faqs = await listFaqs();
 
   return (
     <>

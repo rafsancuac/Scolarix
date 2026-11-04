@@ -22,8 +22,8 @@ export const metadata: Metadata = {
   alternates: { canonical: "/bundles" },
 };
 
-export default function BundlesPage() {
-  const bundles = listBundles();
+export default async function BundlesPage() {
+  const bundles = await listBundles();
 
   return (
     <>

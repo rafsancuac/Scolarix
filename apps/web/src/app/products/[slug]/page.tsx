@@ -33,8 +33,8 @@ import {
 } from "@/lib/repository";
 import type { Product } from "@/lib/types";
 
-export function generateStaticParams() {
-  return listProducts().map((product) => ({ slug: product.slug }));
+export async function generateStaticParams() {
+  return (await listProducts()).map((product) => ({ slug: product.slug }));
 }
 
 export async function generateMetadata({
@@ -43,10 +43,10 @@ export async function generateMetadata({
   params: Promise<{ slug: string }>;
 }): Promise<Metadata> {
   const { slug } = await params;
-  const product = getProductBySlug(slug);
+  const product = await getProductBySlug(slug);
   if (!product) return { title: "Product not found", robots: { index: false } };
 
-  const category = getCategory(product.categorySlug);
+  const category = await getCategory(product.categorySlug);
   return {
     title: `${product.name} price in Bangladesh`,
     description: `${product.shortDescription} Sourced through ${product.relationshipLabel.toLowerCase()}. ${product.disclosureText}`,
@@ -63,14 +63,14 @@ const AVAILABILITY_COPY = {
 
 export default async function ProductPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
-  const product = getProductBySlug(slug);
+  const product = await getProductBySlug(slug);
   if (!product) notFound();
 
   const gate = evaluatePurchaseGate(product);
   const availability = availabilityOf(product);
   const cheapest = cheapestActivePlan(product);
-  const category = getCategory(product.categorySlug);
-  const related = listRelated(product, 3);
+  const category = await getCategory(product.categorySlug);
+  const related = await listRelated(product, 3);
 
   return (
     <>

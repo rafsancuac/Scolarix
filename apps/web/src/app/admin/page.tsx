@@ -64,10 +64,10 @@ export default async function AdminPage() {
     listServiceRequests(),
   ]);
 
-  const products = listProducts();
-  const services = listServices();
-  const bundles = listBundles();
-  const categories = listCategories();
+  const products = await listProducts();
+  const services = await listServices();
+  const bundles = await listBundles();
+  const categories = await listCategories();
   const matrix = capabilityMatrix();
 
   const reviewQueue = requests.filter((request) => request.outcome === "REVIEW_REQUIRED");

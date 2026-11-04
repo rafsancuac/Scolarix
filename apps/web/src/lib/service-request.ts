@@ -141,10 +141,10 @@ const BD_MOBILE_PATTERN = /^(?:\+?880|0)1[3-9]\d{8}$/;
 export const MIN_BRIEF_LENGTH = 40;
 export const MAX_BRIEF_LENGTH = 4000;
 
-export function validateServiceRequest(input: ServiceRequestInput): ValidationResult {
+export async function validateServiceRequest(input: ServiceRequestInput): ValidationResult {
   const errors: Record<string, string> = {};
 
-  const service = input.serviceSlug ? getServiceBySlug(input.serviceSlug) : undefined;
+  const service = input.serviceSlug ? (await getServiceBySlug(input.serviceSlug)) : undefined;
   if (!service) {
     errors.serviceSlug = "That service is not available.";
   }
@@ -226,7 +226,7 @@ export function generateRequestReference(now: Date = new Date()): string {
  * Builds the record the caller persists. Timestamps are UTC (§6 rule 12);
  * display-time conversion happens in `formatDateTime`.
  */
-export function buildServiceRequest(args: {
+export async function buildServiceRequest(args: {
   input: ServiceRequestInput;
   matchedFlags: string[];
   now?: Date;
@@ -235,7 +235,7 @@ export function buildServiceRequest(args: {
 }): ValidatedServiceRequest {
   const { input, matchedFlags } = args;
   const now = args.now ?? new Date();
-  const service = getServiceBySlug(input.serviceSlug);
+  const service = await getServiceBySlug(input.serviceSlug);
 
   return {
     reference: generateRequestReference(now),

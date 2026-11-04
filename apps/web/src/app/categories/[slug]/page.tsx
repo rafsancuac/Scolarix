@@ -18,8 +18,8 @@ import { getCategory, listByCategory, listCategories, listServices } from "@/lib
 import type { CategorySlug } from "@/lib/types";
 import { VERTICAL_META } from "@/lib/types";
 
-export function generateStaticParams() {
-  return listCategories().map((category) => ({ slug: category.slug }));
+export async function generateStaticParams() {
+  return (await listCategories()).map((category) => ({ slug: category.slug }));
 }
 
 export async function generateMetadata({
@@ -28,7 +28,7 @@ export async function generateMetadata({
   params: Promise<{ slug: string }>;
 }): Promise<Metadata> {
   const { slug } = await params;
-  const category = getCategory(slug);
+  const category = await getCategory(slug);
   if (!category) return { title: "Category not found", robots: { index: false } };
 
   return {
@@ -40,12 +40,12 @@ export async function generateMetadata({
 
 export default async function CategoryPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
-  const category = getCategory(slug);
+  const category = await getCategory(slug);
   if (!category) notFound();
 
-  const items = listByCategory(slug as CategorySlug);
+  const items = await listByCategory(slug as CategorySlug);
   const purchasable = items.filter((item) => item.availability !== "UNAVAILABLE");
-  const relatedServices = listServices().filter((service) =>
+  const relatedServices = (await listServices()).filter((service) =>
     service.categoryLabel.toLowerCase().includes(category.label.split(" ")[0]!.toLowerCase()),
   );
   const iconName: IconName = CATEGORY_ICON[category.slug] ?? "Tag";
@@ -167,7 +167,7 @@ export default async function CategoryPage({ params }: { params: Promise<{ slug:
             Other categories
           </h2>
           <ul className="mt-4 flex flex-wrap gap-2">
-            {listCategories()
+            {(await listCategories())
               .filter((other) => other.slug !== category.slug)
               .map((other) => (
                 <li key={other.slug}>

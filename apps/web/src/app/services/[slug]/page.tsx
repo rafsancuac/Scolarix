@@ -26,8 +26,8 @@ import { formatTurnaround } from "@/lib/format";
 import { breadcrumbJsonLd, serviceJsonLd } from "@/lib/metadata";
 import { getServiceBySlug, listServices } from "@/lib/repository";
 
-export function generateStaticParams() {
-  return listServices().map((service) => ({ slug: service.slug }));
+export async function generateStaticParams() {
+  return (await listServices()).map((service) => ({ slug: service.slug }));
 }
 
 export async function generateMetadata({
@@ -36,7 +36,7 @@ export async function generateMetadata({
   params: Promise<{ slug: string }>;
 }): Promise<Metadata> {
   const { slug } = await params;
-  const service = getServiceBySlug(slug);
+  const service = await getServiceBySlug(slug);
   if (!service) return { title: "Service not found", robots: { index: false } };
 
   return {
@@ -48,10 +48,10 @@ export async function generateMetadata({
 
 export default async function ServicePage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
-  const service = getServiceBySlug(slug);
+  const service = await getServiceBySlug(slug);
   if (!service) notFound();
 
-  const others = listServices()
+  const others = (await listServices())
     .filter((item) => item.slug !== service.slug)
     .slice(0, 3);
 

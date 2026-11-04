@@ -14,7 +14,7 @@ import {
   listServices,
 } from "@/lib/repository";
 
-export default function sitemap(): MetadataRoute.Sitemap {
+export default async function sitemap(): MetadataRoute.Sitemap {
   const now = new Date();
   const base = metadataBase.toString().replace(/\/$/, "");
 
@@ -30,28 +30,28 @@ export default function sitemap(): MetadataRoute.Sitemap {
     { url: `${base}/support`, lastModified: now, changeFrequency: "monthly", priority: 0.5 },
   ];
 
-  const productRoutes: MetadataRoute.Sitemap = listProducts().map((product) => ({
+  const productRoutes: MetadataRoute.Sitemap = (await listProducts()).map((product) => ({
     url: `${base}/products/${product.slug}`,
     lastModified: now,
     changeFrequency: "weekly",
     priority: 0.9,
   }));
 
-  const serviceRoutes: MetadataRoute.Sitemap = listServices().map((service) => ({
+  const serviceRoutes: MetadataRoute.Sitemap = (await listServices()).map((service) => ({
     url: `${base}/services/${service.slug}`,
     lastModified: now,
     changeFrequency: "weekly",
     priority: 0.8,
   }));
 
-  const bundleRoutes: MetadataRoute.Sitemap = listBundles().map((bundle) => ({
+  const bundleRoutes: MetadataRoute.Sitemap = (await listBundles()).map((bundle) => ({
     url: `${base}/bundles/${bundle.slug}`,
     lastModified: now,
     changeFrequency: "weekly",
     priority: 0.7,
   }));
 
-  const categoryRoutes: MetadataRoute.Sitemap = listCategories().map((category) => ({
+  const categoryRoutes: MetadataRoute.Sitemap = (await listCategories()).map((category) => ({
     url: `${base}/categories/${category.slug}`,
     lastModified: now,
     changeFrequency: "weekly",
