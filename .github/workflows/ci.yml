@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck --workspace @marketplace/web
+
+      - name: Unit tests
+        run: npm run test --workspace @marketplace/web
+
+      - name: Catalogue financial verification
+        run: npm run verify-financials --workspace @marketplace/web
+
+      - name: Validate Prisma schema
+        run: npm run validate --workspace @marketplace/database
+        env:
+          DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
+          DIRECT_DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
+
+      - name: Production build
+        run: npm run build --workspace @marketplace/web
+
+      - name: Dependency audit (high+)
+        run: npm audit --audit-level=high --omit=dev
