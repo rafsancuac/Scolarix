@@ -23,3 +23,6 @@ packages/database/generated/
 
 # Docker
 docker-compose.override.yml
+
+.npm-cache/
+apps/web/.next-start*.log
