@@ -1,0 +1,22 @@
+{
+  "name": "scolarix",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=20.9.0"
+  },
+  "scripts": {
+    "dev": "npm run dev --workspace @marketplace/web",
+    "build": "npm run build --workspace @marketplace/web",
+    "start": "npm run start --workspace @marketplace/web",
+    "typecheck": "npm run typecheck --workspace @marketplace/web",
+    "test": "npm run test --workspace @marketplace/web",
+    "verify-financials": "npm run verify-financials --workspace @marketplace/web",
+    "check": "npm run check --workspace @marketplace/web",
+    "db:validate": "npm run validate --workspace @marketplace/database",
+    "db:generate": "npm run generate --workspace @marketplace/database"
+  }
+}
