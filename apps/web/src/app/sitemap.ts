@@ -14,7 +14,7 @@ import {
   listServices,
 } from "@/lib/repository";
 
-export default async function sitemap(): MetadataRoute.Sitemap {
+export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const now = new Date();
   const base = metadataBase.toString().replace(/\/$/, "");
 

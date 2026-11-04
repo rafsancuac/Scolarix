@@ -8,7 +8,7 @@
  */
 
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { describe, it, before } from "node:test";
 
 import {
   availabilityOf,
@@ -27,14 +27,17 @@ import { PUBLISHABLE_AUTHORIZATION } from "../src/lib/types";
 import type { Product } from "../src/lib/types";
 
 /** Builds a product from a real fixture listing so the shape stays honest. */
-async function withOverrides(overrides: Partial<Product>): Product {
+async function withOverrides(overrides: Partial<Product>): Promise<Product> {
   const base = (await listProducts())[0];
   assert.ok(base, "the fixture catalogue must contain at least one product");
   return { ...base, ...overrides };
 }
 
 describe("the Turnitin rule (mandatory test #4)", () => {
-  const turnitin = getProductBySlug("turnitin");
+  let turnitin: Product | undefined;
+  before(async () => {
+    turnitin = await getProductBySlug("turnitin");
+  });
 
   it("is present in the catalogue for information", () => {
     assert.ok(turnitin, "Turnitin must remain visible in the catalogue");
@@ -70,23 +73,23 @@ describe("the Turnitin rule (mandatory test #4)", () => {
 });
 
 describe("every §11.2 blocking condition", () => {
-  it("blocks an unpublished product even with valid authorization and a plan", () => {
-    const product = withOverrides({ status: "DRAFT" });
+  it("blocks an unpublished product even with valid authorization and a plan", async () => {
+    const product = await withOverrides({ status: "DRAFT" });
     const gate = evaluatePurchaseGate(product);
     assert.equal(gate?.reason, "NOT_PUBLISHED");
     assert.equal(isPurchasable(product), false);
   });
 
-  it("blocks a product whose authorization evidence is still pending", () => {
-    const product = withOverrides({
+  it("blocks a product whose authorization evidence is still pending", async () => {
+    const product = await withOverrides({
       status: "PUBLISHED",
       authorizationStatus: "PENDING_VERIFICATION",
     });
     assert.equal(evaluatePurchaseGate(product)?.reason, "EVIDENCE_MISSING");
   });
 
-  it("blocks a listing whose authorization evidence has expired (mandatory test #4)", () => {
-    const product = withOverrides({
+  it("blocks a listing whose authorization evidence has expired (mandatory test #4)", async () => {
+    const product = await withOverrides({
       status: "PUBLISHED",
       authorizationStatus: "EXPIRED_EVIDENCE",
     });
@@ -106,8 +109,8 @@ describe("every §11.2 blocking condition", () => {
     assert.equal(isPurchasable(expired), false);
   });
 
-  it("blocks a product with no active plan even when authorization is valid", () => {
-    const product = withOverrides({
+  it("blocks a product with no active plan even when authorization is valid", async () => {
+    const product = await withOverrides({
       status: "PUBLISHED",
       authorizationStatus: "AUTHORIZED_RESELLER",
       plans: [],
@@ -115,8 +118,8 @@ describe("every §11.2 blocking condition", () => {
     assert.equal(evaluatePurchaseGate(product)?.reason, "NO_ACTIVE_PLAN");
   });
 
-  it("blocks a product whose only plans are inactive", () => {
-    const product = withOverrides({
+  it("blocks a product whose only plans are inactive", async () => {
+    const product = await withOverrides({
       status: "PUBLISHED",
       authorizationStatus: "AUTHORIZED_RESELLER",
       plans: [
@@ -135,8 +138,8 @@ describe("every §11.2 blocking condition", () => {
     assert.equal(evaluatePurchaseGate(product)?.reason, "NO_ACTIVE_PLAN");
   });
 
-  it("passes a fully authorized product with an active plan", () => {
-    const product = withOverrides({
+  it("passes a fully authorized product with an active plan", async () => {
+    const product = await withOverrides({
       status: "PUBLISHED",
       authorizationStatus: "AUTHORIZED_RESELLER",
       plans: [
@@ -183,8 +186,8 @@ function trackedPlan(
 }
 
 describe("availability (§9.2.2)", () => {
-  it("reports UNAVAILABLE for anything that fails the gate", () => {
-    const blocked = withOverrides({ status: "ARCHIVED" });
+  it("reports UNAVAILABLE for anything that fails the gate", async () => {
+    const blocked = await withOverrides({ status: "ARCHIVED" });
     assert.equal(availabilityOf(blocked), "UNAVAILABLE");
   });
 
@@ -200,7 +203,7 @@ describe("availability (§9.2.2)", () => {
   // single tracked plan to make the arithmetic unambiguous.
   it("reports UNAVAILABLE when tracked stock is exhausted", async () => {
     const source = (await listProducts()).find((p) => isPurchasable(p));
-    const product = withOverrides({
+    const product = await withOverrides({
       ...source!,
       plans: [trackedPlan(source!, "TRACKED", 0)],
     });
@@ -209,7 +212,7 @@ describe("availability (§9.2.2)", () => {
 
   it("reports LOW_STOCK at or below the threshold", async () => {
     const source = (await listProducts()).find((p) => isPurchasable(p));
-    const product = withOverrides({
+    const product = await withOverrides({
       ...source!,
       plans: [trackedPlan(source!, "CODE_VAULT", 3)],
     });
@@ -218,7 +221,7 @@ describe("availability (§9.2.2)", () => {
 
   it("reports IN_STOCK just above the threshold", async () => {
     const source = (await listProducts()).find((p) => isPurchasable(p));
-    const product = withOverrides({
+    const product = await withOverrides({
       ...source!,
       plans: [trackedPlan(source!, "CODE_VAULT", 6)],
     });
@@ -227,7 +230,7 @@ describe("availability (§9.2.2)", () => {
 
   it("sums stock across plans, so two low plans are not low together", async () => {
     const source = (await listProducts()).find((p) => isPurchasable(p));
-    const product = withOverrides({
+    const product = await withOverrides({
       ...source!,
       plans: [trackedPlan(source!, "CODE_VAULT", 3), trackedPlan(source!, "TRACKED", 4, "b")],
     });

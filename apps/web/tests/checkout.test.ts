@@ -15,7 +15,7 @@ import { applyBasisPoints } from "../src/lib/money";
 import { getProductBySlug, listBundles, listProducts } from "../src/lib/repository";
 import type { Bundle, Product } from "../src/lib/types";
 
-async function lineFor(slug: string, planIndex = 0): CartLineInput {
+async function lineFor(slug: string, planIndex = 0): Promise<CartLineInput> {
   const product = await getProductBySlug(slug);
   assert.ok(product, `fixture product ${slug} must exist`);
   const plan = product!.plans.filter((p) => p.active)[planIndex];
@@ -23,7 +23,7 @@ async function lineFor(slug: string, planIndex = 0): CartLineInput {
   return { product: product!, plan: plan!, quantity: 1 };
 }
 
-async function purchasableSlug(): string {
+async function purchasableSlug(): Promise<string> {
   const product = (await listProducts()).find(
     (p) => p.status === "PUBLISHED" && p.plans.some((plan) => plan.active),
   );
@@ -32,8 +32,8 @@ async function purchasableSlug(): string {
 }
 
 describe("priceCart — line integrity", () => {
-  it("prices a single line from the catalogue, never from the caller", () => {
-    const line = lineFor(purchasableSlug());
+  it("prices a single line from the catalogue, never from the caller", async () => {
+    const line = await lineFor(await purchasableSlug());
     const cart = priceCart([line]);
 
     assert.equal(cart.lines.length, 1);
@@ -42,16 +42,16 @@ describe("priceCart — line integrity", () => {
     assert.equal(cart.totalPoisha, line.plan.pricePoisha); // no VAT configured
   });
 
-  it("scales a line by quantity in integer poisha", () => {
-    const line = lineFor(purchasableSlug());
+  it("scales a line by quantity in integer poisha", async () => {
+    const line = await lineFor(await purchasableSlug());
     const cart = priceCart([{ ...line, quantity: 3 }]);
 
     assert.equal(cart.subtotalPoisha, line.plan.pricePoisha * 3);
     assert.equal(Number.isInteger(cart.subtotalPoisha), true);
   });
 
-  it("records the order-line snapshot fields that must never change later", () => {
-    const line = lineFor(purchasableSlug());
+  it("records the order-line snapshot fields that must never change later", async () => {
+    const line = await lineFor(await purchasableSlug());
     const snapshot = priceCart([line]).lines[0]!;
 
     assert.equal(snapshot.sku, line.plan.sku);
@@ -76,7 +76,7 @@ describe("priceCart — the compliance gate is enforced at pricing time", () => 
   it("removes Turnitin from the total and reports it as blocked", async () => {
     const turnitin = await getProductBySlug("turnitin");
     assert.ok(turnitin);
-    const good = lineFor(purchasableSlug());
+    const good = await lineFor(await purchasableSlug());
 
     // Turnitin has no plans, so it cannot even be constructed as a line from
     // the catalogue — which is the first half of the protection. Simulate an
@@ -121,8 +121,8 @@ describe("priceCart — the compliance gate is enforced at pricing time", () => 
 });
 
 describe("priceCart — discount ladder (§13.8)", () => {
-  it("applies nothing when no discount is configured", () => {
-    const line = lineFor(purchasableSlug());
+  it("applies nothing when no discount is configured", async () => {
+    const line = await lineFor(await purchasableSlug());
     const cart = priceCart([line]);
 
     assert.equal(cart.steps.length, 0);
@@ -130,8 +130,8 @@ describe("priceCart — discount ladder (§13.8)", () => {
     assert.equal(cart.formatted.discount, "৳0");
   });
 
-  it("ignores a student discount unless the shopper is genuinely verified", () => {
-    const line = lineFor(purchasableSlug());
+  it("ignores a student discount unless the shopper is genuinely verified", async () => {
+    const line = await lineFor(await purchasableSlug());
 
     const unverified = priceCart([line], { studentDiscountBp: 1000, studentVerified: false });
     assert.equal(unverified.discountPoisha, 0);
@@ -145,7 +145,7 @@ describe("priceCart — discount ladder (§13.8)", () => {
   });
 
   it("keeps BUNDLE before STUDENT before COUPON in a multi-discount cart", async () => {
-    const line = lineFor(purchasableSlug());
+    const line = await lineFor(await purchasableSlug());
 
     // A deliberately small bundle saving, so later ladder steps still have
     // headroom. The real fixture bundles save more than the whole line costs,
@@ -181,7 +181,7 @@ describe("priceCart — discount ladder (§13.8)", () => {
   });
 
   it("drives a large real bundle saving to the floor and suppresses later steps", async () => {
-    const line = lineFor(purchasableSlug());
+    const line = await lineFor(await purchasableSlug());
     const bundle = (await listBundles())[0];
     assert.ok(bundle);
 
@@ -214,8 +214,8 @@ describe("priceCart — discount ladder (§13.8)", () => {
     assert.equal(cart.discountPoisha, 0);
   });
 
-  it("respects a coupon's minimum cart value", () => {
-    const line = lineFor(purchasableSlug());
+  it("respects a coupon's minimum cart value", async () => {
+    const line = await lineFor(await purchasableSlug());
     const cart = priceCart([line], {
       coupon: {
         code: "BIGSPEND",
@@ -226,8 +226,8 @@ describe("priceCart — discount ladder (§13.8)", () => {
     assert.equal(cart.discountPoisha, 0);
   });
 
-  it("adds subtotal minus discounts to get the taxable amount, then VAT", () => {
-    const line = lineFor(purchasableSlug());
+  it("adds subtotal minus discounts to get the taxable amount, then VAT", async () => {
+    const line = await lineFor(await purchasableSlug());
     const cart = priceCart([line], { studentVerified: true, studentDiscountBp: 1000, vatRateBp: 500 });
 
     const expectedDiscount = applyBasisPoints(line.plan.pricePoisha, 1000);
@@ -241,8 +241,8 @@ describe("priceCart — discount ladder (§13.8)", () => {
     assert.equal(Number.isInteger(cart.totalPoisha), true);
   });
 
-  it("reports the price floor when a discount is clipped", () => {
-    const line = lineFor(purchasableSlug());
+  it("reports the price floor when a discount is clipped", async () => {
+    const line = await lineFor(await purchasableSlug());
     const cart = priceCart([line], {
       coupon: { code: "HUGE", fixedPoisha: line.plan.pricePoisha * 2 },
       floorPoisha: Math.max(1, Math.floor(line.plan.pricePoisha / 2)),
@@ -254,8 +254,8 @@ describe("priceCart — discount ladder (§13.8)", () => {
 });
 
 describe("formatted output", () => {
-  it("renders every summary figure with the Taka sign", () => {
-    const cart = priceCart([lineFor(purchasableSlug())]);
+  it("renders every summary figure with the Taka sign", async () => {
+    const cart = priceCart([await lineFor(await purchasableSlug())]);
     for (const value of Object.values(cart.formatted)) {
       assert.ok(value.startsWith("৳"), `${value} must start with the Taka sign`);
     }

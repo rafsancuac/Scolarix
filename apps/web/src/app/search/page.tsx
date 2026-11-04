@@ -41,15 +41,19 @@ export default async function SearchPage({
   const hasQuery = query.length > 0;
   const hits = hasQuery ? (await search(query, 24)) : [];
 
+  const allItems = hasQuery ? await listProductItems() : [];
   const productHits = hits
     .filter((hit) => hit.kind === "product")
-    .map((hit) => listProductItems().find((item) => item.product.slug === hit.slug))
+    .map((hit) => allItems.find((item) => item.product.slug === hit.slug))
     .filter((item): item is NonNullable<typeof item> => item !== undefined);
 
-  const serviceHits = hits
-    .filter((hit) => hit.kind === "service")
-    .map((hit) => getServiceBySlug(hit.slug))
-    .filter((service): service is NonNullable<typeof service> => service !== undefined);
+  const serviceHits = (
+    await Promise.all(
+      hits
+        .filter((hit) => hit.kind === "service")
+        .map((hit) => getServiceBySlug(hit.slug)),
+    )
+  ).filter((service): service is NonNullable<typeof service> => service !== undefined);
 
   const categories = await listCategories();
 

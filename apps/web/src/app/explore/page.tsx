@@ -48,7 +48,7 @@ interface ExploreParams {
   page?: string;
 }
 
-function sortItems(items: ReturnType<typeof listProductItems>, sort: SortKey) {
+function sortItems(items: Awaited<ReturnType<typeof listProductItems>>, sort: SortKey) {
   const sorted = [...items];
   switch (sort) {
     case "price-asc":

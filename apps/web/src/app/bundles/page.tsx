@@ -24,6 +24,14 @@ export const metadata: Metadata = {
 
 export default async function BundlesPage() {
   const bundles = await listBundles();
+  const plansBySku = new Map<string, Awaited<ReturnType<typeof getPlanBySku>>>();
+  for (const b of bundles) {
+    for (const i of b.items) {
+      if (!plansBySku.has(i.sku)) {
+        plansBySku.set(i.sku, await getPlanBySku(i.sku));
+      }
+    }
+  }
 
   return (
     <>
@@ -103,7 +111,7 @@ export default async function BundlesPage() {
 
                     <ul className="divide-y divide-line rounded-input border border-line">
                       {bundle.items.map((item) => {
-                        const plan = getPlanBySku(item.sku);
+                        const plan = plansBySku.get(item.sku);
                         const href = plan
                           ? `/products/${plan.product.slug}`
                           : `/services`;

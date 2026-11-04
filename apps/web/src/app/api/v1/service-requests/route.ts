@@ -89,7 +89,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const validation = validateServiceRequest(input);
+  const validation = await validateServiceRequest(input);
   if (!validation.ok) {
     return NextResponse.json(
       {
@@ -109,7 +109,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const record = buildServiceRequest({
+  const record = await buildServiceRequest({
     input,
     matchedFlags: validation.matchedFlags,
     ipAddress: ip,

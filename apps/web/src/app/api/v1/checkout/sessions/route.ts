@@ -64,8 +64,8 @@ export async function POST(request: NextRequest) {
   }
 
   // Prices are re-derived here — the client supplied SKUs only, never amounts.
-  const lines: CartLineInput[] = skus
-    .map((sku) => getPlanBySku(sku))
+  const resolvedPlans = await Promise.all(skus.map((sku) => getPlanBySku(sku)));
+  const lines: CartLineInput[] = resolvedPlans
     .filter((entry): entry is NonNullable<typeof entry> => entry !== undefined)
     .map(({ product, plan }) => ({ product, plan, quantity: 1 }));
 

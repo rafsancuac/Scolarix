@@ -40,6 +40,12 @@ export default async function BundlePage({ params }: { params: Promise<{ slug: s
   const { slug } = await params;
   const bundle = await getBundleBySlug(slug);
   if (!bundle) notFound();
+  const plansBySku = new Map<string, Awaited<ReturnType<typeof getPlanBySku>>>();
+  for (const i of bundle.items) {
+    if (!plansBySku.has(i.sku)) {
+      plansBySku.set(i.sku, await getPlanBySku(i.sku));
+    }
+  }
 
   const saved = savingsPoisha(bundle.pricePoisha, bundle.compareAtPoisha) ?? 0;
   const percent = savingsPercentPoisha(bundle.pricePoisha, bundle.compareAtPoisha);
@@ -103,7 +109,7 @@ export default async function BundlePage({ params }: { params: Promise<{ slug: s
               </h2>
               <ul className="mt-5 divide-y divide-line overflow-hidden rounded-card border border-line bg-surface-1">
                 {bundle.items.map((item) => {
-                  const plan = getPlanBySku(item.sku);
+                  const plan = plansBySku.get(item.sku);
                   const href = plan ? `/products/${plan.product.slug}` : "/services";
                   return (
                     <li key={item.sku} className="flex items-center gap-4 p-5">

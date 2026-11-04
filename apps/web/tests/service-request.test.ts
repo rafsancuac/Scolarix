@@ -9,7 +9,7 @@
  */
 
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { describe, it, before } from "node:test";
 
 import {
   MAX_BRIEF_LENGTH,
@@ -22,7 +22,10 @@ import {
 } from "../src/lib/service-request";
 import { listServices } from "../src/lib/repository";
 
-const SLUG = listServices()[0]!.slug;
+let SLUG = "";
+before(async () => {
+  SLUG = (await listServices())[0]!.slug;
+});
 
 function validInput(overrides: Partial<ServiceRequestInput> = {}): ServiceRequestInput {
   return {
@@ -40,23 +43,23 @@ function validInput(overrides: Partial<ServiceRequestInput> = {}): ServiceReques
 }
 
 describe("the mandatory declaration", () => {
-  it("rejects a request submitted without the integrity acknowledgement", () => {
-    const result = validateServiceRequest(validInput({ integrityAcknowledged: false }));
+  it("rejects a request submitted without the integrity acknowledgement", async () => {
+    const result = await validateServiceRequest(validInput({ integrityAcknowledged: false }));
     assert.equal(result.ok, false);
     assert.ok(result.errors.integrityAcknowledged);
   });
 
-  it("rejects a request where the acknowledgement is a truthy non-boolean", () => {
+  it("rejects a request where the acknowledgement is a truthy non-boolean", async () => {
     // A client sending "yes" or 1 must not satisfy a boolean requirement.
-    const result = validateServiceRequest(
+    const result = await validateServiceRequest(
       validInput({ integrityAcknowledged: "yes" as unknown as boolean }),
     );
     assert.equal(result.ok, false);
     assert.ok(result.errors.integrityAcknowledged);
   });
 
-  it("accepts a well-formed request with the acknowledgement", () => {
-    const result = validateServiceRequest(validInput());
+  it("accepts a well-formed request with the acknowledgement", async () => {
+    const result = await validateServiceRequest(validInput());
     assert.deepEqual(result.errors, {});
     assert.equal(result.ok, true);
   });
@@ -79,17 +82,17 @@ describe("prohibited-scope screen — must fire", () => {
   ];
 
   for (const [name, brief] of prohibited) {
-    it(`flags ${name}`, () => {
+    it(`flags ${name}`, async () => {
       const flags = screenForProhibitedScope(brief);
       assert.ok(flags.length > 0, `expected a flag for: ${brief}`);
-      const result = validateServiceRequest(validInput({ brief }));
+      const result = await validateServiceRequest(validInput({ brief }));
       assert.equal(result.ok, true, "the screen routes to review, it does not reject the fields");
       assert.ok(result.matchedFlags.length > 0);
     });
   }
 
-  it("routes a flagged request to REVIEW_REQUIRED, never to an automatic quote", () => {
-    const record = buildServiceRequest({
+  it("routes a flagged request to REVIEW_REQUIRED, never to an automatic quote", async () => {
+    const record = await buildServiceRequest({
       input: validInput({ brief: "Please write my thesis for me and make it beat Turnitin." }),
       matchedFlags: screenForProhibitedScope(
         "Please write my thesis for me and make it beat Turnitin.",
@@ -122,9 +125,9 @@ describe("prohibited-scope screen — must NOT fire on legitimate work", () => {
     });
   }
 
-  it("sends a clean request straight to the quotation queue", () => {
+  it("sends a clean request straight to the quotation queue", async () => {
     const input = validInput();
-    const record = buildServiceRequest({
+    const record = await buildServiceRequest({
       input,
       matchedFlags: screenForProhibitedScope(input.brief),
     });
@@ -134,77 +137,77 @@ describe("prohibited-scope screen — must NOT fire on legitimate work", () => {
 });
 
 describe("field validation", () => {
-  it("rejects an unknown service slug", () => {
-    const result = validateServiceRequest(validInput({ serviceSlug: "not-a-service" }));
+  it("rejects an unknown service slug", async () => {
+    const result = await validateServiceRequest(validInput({ serviceSlug: "not-a-service" }));
     assert.equal(result.ok, false);
     assert.ok(result.errors.serviceSlug);
   });
 
-  it("rejects a package that does not belong to the service", () => {
-    const result = validateServiceRequest(validInput({ packageId: "pkg-does-not-exist" }));
+  it("rejects a package that does not belong to the service", async () => {
+    const result = await validateServiceRequest(validInput({ packageId: "pkg-does-not-exist" }));
     assert.equal(result.ok, false);
     assert.ok(result.errors.packageId);
   });
 
   it("accepts a real package belonging to the service", async () => {
     const service = (await listServices())[0]!;
-    const result = validateServiceRequest(validInput({ packageId: service.packages[0]?.id }));
+    const result = await validateServiceRequest(validInput({ packageId: service.packages[0]?.id }));
     assert.equal(result.ok, true);
   });
 
-  it("rejects a malformed email", () => {
+  it("rejects a malformed email", async () => {
     for (const email of ["", "nusrat@", "@example.com", "nusrat at example dot com", "a@b"]) {
-      const result = validateServiceRequest(validInput({ email }));
+      const result = await validateServiceRequest(validInput({ email }));
       assert.equal(result.ok, false, `${email} must be rejected`);
       assert.ok(result.errors.email);
     }
   });
 
-  it("accepts Bangladeshi mobile formats and rejects others", () => {
+  it("accepts Bangladeshi mobile formats and rejects others", async () => {
     for (const phone of ["+8801712345678", "01712345678", "8801712345678", "+880 1712-345678"]) {
-      assert.equal(validateServiceRequest(validInput({ phone })).ok, true, phone);
+      assert.equal((await validateServiceRequest(validInput({ phone }))).ok, true, phone);
     }
     for (const phone of ["01212345678", "1712345678", "+880171234567", "017123456789999", "hello"]) {
-      assert.equal(validateServiceRequest(validInput({ phone })).ok, false, phone);
+      assert.equal((await validateServiceRequest(validInput({ phone }))).ok, false, phone);
     }
   });
 
-  it("treats the phone number as optional", () => {
-    assert.equal(validateServiceRequest(validInput({ phone: undefined })).ok, true);
-    assert.equal(validateServiceRequest(validInput({ phone: "" })).ok, true);
+  it("treats the phone number as optional", async () => {
+    assert.equal((await validateServiceRequest(validInput({ phone: undefined }))).ok, true);
+    assert.equal((await validateServiceRequest(validInput({ phone: "" }))).ok, true);
   });
 
-  it("enforces the brief length bounds", () => {
-    assert.equal(validateServiceRequest(validInput({ brief: "too short" })).ok, false);
+  it("enforces the brief length bounds", async () => {
+    assert.equal((await validateServiceRequest(validInput({ brief: "too short" }))).ok, false);
     assert.equal(
-      validateServiceRequest(validInput({ brief: "x".repeat(MIN_BRIEF_LENGTH - 1) })).ok,
+      (await validateServiceRequest(validInput({ brief: "x".repeat(MIN_BRIEF_LENGTH - 1) }))).ok,
       false,
     );
     assert.equal(
-      validateServiceRequest(validInput({ brief: "x".repeat(MIN_BRIEF_LENGTH) })).ok,
+      (await validateServiceRequest(validInput({ brief: "x".repeat(MIN_BRIEF_LENGTH) }))).ok,
       true,
     );
     assert.equal(
-      validateServiceRequest(validInput({ brief: "x".repeat(MAX_BRIEF_LENGTH + 1) })).ok,
+      (await validateServiceRequest(validInput({ brief: "x".repeat(MAX_BRIEF_LENGTH + 1) }))).ok,
       false,
     );
   });
 
-  it("rejects a deadline that has already passed", () => {
+  it("rejects a deadline that has already passed", async () => {
     const yesterday = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-    const result = validateServiceRequest(validInput({ deadline: yesterday }));
+    const result = await validateServiceRequest(validInput({ deadline: yesterday }));
     assert.equal(result.ok, false);
     assert.ok(result.errors.deadline);
   });
 
-  it("rejects a name that is too short", () => {
-    assert.equal(validateServiceRequest(validInput({ name: " " })).ok, false);
-    assert.equal(validateServiceRequest(validInput({ name: "A" })).ok, false);
-    assert.equal(validateServiceRequest(validInput({ name: "Nu" })).ok, true);
+  it("rejects a name that is too short", async () => {
+    assert.equal((await validateServiceRequest(validInput({ name: " " }))).ok, false);
+    assert.equal((await validateServiceRequest(validInput({ name: "A" }))).ok, false);
+    assert.equal((await validateServiceRequest(validInput({ name: "Nu" }))).ok, true);
   });
 
-  it("trims whitespace and lowercases the email in the stored record", () => {
-    const record = buildServiceRequest({
+  it("trims whitespace and lowercases the email in the stored record", async () => {
+    const record = await buildServiceRequest({
       input: validInput({ name: "  Nusrat Jahan  ", email: "  Nusrat@Student.CU.AC.BD " }),
       matchedFlags: [],
     });
@@ -214,9 +217,9 @@ describe("field validation", () => {
 });
 
 describe("the stored record", () => {
-  it("stores the declaration with an ISO timestamp and the caller's IP", () => {
+  it("stores the declaration with an ISO timestamp and the caller's IP", async () => {
     const now = new Date("2026-11-04T09:30:00.000Z");
-    const record = buildServiceRequest({
+    const record = await buildServiceRequest({
       input: validInput(),
       matchedFlags: [],
       now,
@@ -231,14 +234,14 @@ describe("the stored record", () => {
     assert.equal(record.createdAt, "2026-11-04T09:30:00.000Z");
   });
 
-  it("falls back to 'unknown' rather than storing null for the IP", () => {
-    const record = buildServiceRequest({ input: validInput(), matchedFlags: [] });
+  it("falls back to 'unknown' rather than storing null for the IP", async () => {
+    const record = await buildServiceRequest({ input: validInput(), matchedFlags: [] });
     assert.equal(typeof record.declaration.ipAddress, "string");
     assert.ok(record.declaration.ipAddress.length > 0);
   });
 
   it("resolves the service name from the catalogue, not from the client", async () => {
-    const record = buildServiceRequest({ input: validInput(), matchedFlags: [] });
+    const record = await buildServiceRequest({ input: validInput(), matchedFlags: [] });
     assert.equal(record.serviceName, (await listServices())[0]!.name);
   });
 });

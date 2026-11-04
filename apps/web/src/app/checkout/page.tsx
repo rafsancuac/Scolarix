@@ -64,9 +64,9 @@ export default async function CheckoutPage({
 
   // Unknown SKUs are dropped silently: a stale or hand-edited link must not be
   // able to inject a line the catalogue does not contain.
-  const resolved = skus
-    .map((sku) => getPlanBySku(sku))
-    .filter((entry): entry is NonNullable<typeof entry> => entry !== undefined);
+  const resolved = (await Promise.all(skus.map((sku) => getPlanBySku(sku)))).filter(
+    (entry): entry is NonNullable<typeof entry> => entry !== undefined,
+  );
 
   const cartLines: CartLineInput[] = resolved.map(({ product, plan }) => ({
     product,

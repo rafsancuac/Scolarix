@@ -1,6 +1,6 @@
 /**
  * Service request intake — spec §12.5 (request lifecycle) and §12.6 (academic
- * integrity). Pure, synchronous, framework-free so it can be unit-tested
+ * integrity). Catalogue-backed, framework-free so it can be unit-tested
  * without a server (tests/service-request.test.ts).
  *
  * This is the ONLY place that decides whether a request may be accepted, and
@@ -141,7 +141,7 @@ const BD_MOBILE_PATTERN = /^(?:\+?880|0)1[3-9]\d{8}$/;
 export const MIN_BRIEF_LENGTH = 40;
 export const MAX_BRIEF_LENGTH = 4000;
 
-export async function validateServiceRequest(input: ServiceRequestInput): ValidationResult {
+export async function validateServiceRequest(input: ServiceRequestInput): Promise<ValidationResult> {
   const errors: Record<string, string> = {};
 
   const service = input.serviceSlug ? (await getServiceBySlug(input.serviceSlug)) : undefined;
@@ -232,7 +232,7 @@ export async function buildServiceRequest(args: {
   now?: Date;
   ipAddress?: string | null;
   userAgent?: string | null;
-}): ValidatedServiceRequest {
+}): Promise<ValidatedServiceRequest> {
   const { input, matchedFlags } = args;
   const now = args.now ?? new Date();
   const service = await getServiceBySlug(input.serviceSlug);
