@@ -25,6 +25,9 @@ import { formatBDT } from "@/lib/money";
 import { formatDate } from "@/lib/format";
 import { breadcrumbJsonLd } from "@/lib/metadata";
 import { displayContact } from "@/lib/pii";
+import { AdminStats } from "@/components/admin/admin-stats";
+import { can } from "@/server/auth/policy";
+import { requireCapability } from "@/server/auth/guards";
 import {
   countServiceRequests,
   listServiceRequests,
@@ -60,6 +63,8 @@ const ROLE_MATRIX = [
 ];
 
 export default async function AdminPage() {
+  const session = await requireCapability("admin.console.view", "/admin");
+  const revealPii = can(session.user.role, "customer.pii.view");
   const [requestCounts, requests] = await Promise.all([
     countServiceRequests(),
     listServiceRequests(),
@@ -126,6 +131,8 @@ export default async function AdminPage() {
           </p>
         </div>
       </div>
+
+      <AdminStats role={session.user.role} />
 
       <div className="container-page py-10">
         {/* ---------------------------------------------------------------- */}
@@ -391,6 +398,7 @@ export default async function AdminPage() {
               count={requestCounts.reviewRequired}
               empty="Nothing flagged. The screen matched no prohibited-scope phrase."
               requests={reviewQueue}
+              reveal={revealPii}
             />
             <QueueCard
               title="Awaiting quotation"
@@ -398,6 +406,7 @@ export default async function AdminPage() {
               count={requestCounts.quotePending}
               empty="No clean requests waiting for a quote."
               requests={quoteQueue}
+              reveal={revealPii}
             />
           </div>
         </section>
@@ -438,12 +447,14 @@ function QueueCard({
   count,
   empty,
   requests,
+  reveal,
 }: {
   title: string;
   tone: "warning" | "success";
   count: number;
   empty: string;
   requests: Awaited<ReturnType<typeof listServiceRequests>>;
+  reveal: boolean;
 }) {
   return (
     <div className={`card p-5 ${tone === "warning" ? "border-warning/30" : "border-success/30"}`}>
@@ -464,9 +475,9 @@ function QueueCard({
                 <div className="min-w-0">
                   <p className="tnum text-caption font-medium text-primary">{request.reference}</p>
                   <p className="truncate text-caption text-secondary">
-                    {request.serviceName} · {displayContact(request).name}
+                    {request.serviceName} · {displayContact(request, reveal).name}
                   </p>
-                  <p className="truncate text-caption text-muted">{displayContact(request).email}</p>
+                  <p className="truncate text-caption text-muted">{displayContact(request, reveal).email}</p>
                 </div>
                 <span className="tnum shrink-0 text-caption text-muted">
                   {formatDate(request.createdAt)}
@@ -482,11 +493,11 @@ function QueueCard({
                 </p>
               ) : null}
               <p className="mt-2 line-clamp-3 rounded-input bg-surface-2 px-3 py-2 text-caption text-secondary">
-                {displayContact(request).brief}
+                {displayContact(request, reveal).brief}
               </p>
               <p className="mt-2 text-caption text-muted">
                 Declaration acknowledged {formatDate(request.declaration.acknowledgedAt)} · IP{" "}
-                <code className="rounded bg-surface-2 px-1">{displayContact(request).ipAddress}</code>
+                <code className="rounded bg-surface-2 px-1">{displayContact(request, reveal).ipAddress}</code>
               </p>
             </li>
           ))}

@@ -9,7 +9,8 @@ Every result below was actually executed in this session.
 |-------|---------|----------|--------|--------|
 | Dependency install | `npm install` (root workspaces) | clean install | 175 packages, workspace junctions created | ✅ Pass |
 | Typecheck | `npm run typecheck` | 0 errors | 0 errors (after clearing stale `.next` cache) | ✅ Pass |
-| Unit tests | `npm run test` | all pass | **119 / 119** pass, 25 suites | ✅ Pass |
+| Unit tests | `npm run test` | all pass | **145 / 145** pass, 33 suites | ✅ Pass |
+| E2E Auth & Security | `node tests/e2e-auth.mjs` | all pass | **38 / 38** pass | ✅ Pass |
 | Catalogue financials | `npm run verify-financials` | 0 failures | 26 checks, 0 failures; ledger section **SKIPPED** (no `DATABASE_URL` DB) | ⚠️ Partial |
 | Prisma schema | `prisma validate` | valid | valid | ✅ Pass |
 | Production build | `next build` | success | success, 46 pages generated | ✅ Pass |

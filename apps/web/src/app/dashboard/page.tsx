@@ -25,6 +25,8 @@ import { countServiceRequests, listServiceRequests } from "@/lib/request-store";
 import { listProductItems } from "@/lib/repository";
 import { breadcrumbJsonLd } from "@/lib/metadata";
 import { displayContact } from "@/lib/pii";
+import { AccountOverview } from "@/components/dashboard/account-overview";
+import { requireSession } from "@/server/auth/guards";
 
 export const dynamic = "force-dynamic";
 
@@ -65,10 +67,15 @@ const PANELS = [
 ];
 
 export default async function DashboardPage() {
-  const [requestCounts, recentRequests] = await Promise.all([
+  const session = await requireSession("/dashboard");
+  const [requestCounts, allRequests] = await Promise.all([
     countServiceRequests(),
     listServiceRequests(),
   ]);
+  // A customer sees only requests submitted with their own email — never anyone else's (OWASP A01/IDOR).
+  const recentRequests = allRequests.filter(
+    (request) => request.contact.email.toLowerCase() === session.user.email.toLowerCase(),
+  );
   const catalogue = await listProductItems();
   const unavailable = catalogue.filter((item) => item.availability === "UNAVAILABLE");
   const matrix = capabilityMatrix();
@@ -106,11 +113,13 @@ export default async function DashboardPage() {
           </h1>
           <p className="mt-3 max-w-2xl text-body text-secondary">
             Subscriptions, orders, invoices, service requests and renewal reminders in one place —
-            signed in as <strong className="font-medium text-primary">you</strong>, with your own
+            signed in as <strong className="font-medium text-primary">{session.user.email}</strong>, with your own
             data and nobody else&apos;s.
           </p>
         </div>
       </div>
+
+      <AccountOverview userId={session.user.id} name={session.user.name} />
 
       <div className="container-page py-10">
         {!DATABASE_CONNECTED ? (

@@ -18,6 +18,8 @@ const securityHeaders = [
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
+  // The generated Prisma client resolves its query engine at runtime; keep it out of the bundle.
+  serverExternalPackages: ["@marketplace/database", "@prisma/client"],
   output: process.env.NEXT_BUILD_OUTPUT === "standalone" ? "standalone" : undefined,
   images: {
     formats: ["image/avif", "image/webp"],
