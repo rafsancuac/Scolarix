@@ -1,12 +1,13 @@
 /**
  * Repository / data adapter — spec §17.4 layering, §11.2 compliance gate.
  *
- * UI code reads the catalogue ONLY through this module. Today it resolves from
- * seeded fixtures (`DATA_ADAPTER=static`, development and preview). The Prisma
- * adapter (`DATA_ADAPTER=prisma`) implements the same interface against
- * PostgreSQL; swapping it must not require touching a single component.
+ * UI code reads the catalogue ONLY through this module. Every query function is
+ * ASYNC so a database-backed adapter can implement the same contract (ADR-0013,
+ * amended: the seam is a Promise-returning interface). Today it resolves from
+ * seeded fixtures (`DATA_ADAPTER=static`).
  *
- * The compliance gate lives here so no page can accidentally bypass it.
+ * The pure business rules live in `catalogue-rules.ts` and are re-exported here
+ * so existing imports keep working. They stay synchronous on purpose.
  */
 
 import {
@@ -19,10 +20,13 @@ import {
   testimonials,
 } from "../data/fixtures";
 import {
-  PUBLISHABLE_AUTHORIZATION,
+  availabilityOf,
+  cheapestActivePlan,
+  isPurchasable,
+} from "./catalogue-rules";
+import {
   VERTICALS,
   VERTICAL_META,
-  type Availability,
   type BrandVertical,
   type Bundle,
   type Category,
@@ -34,96 +38,17 @@ import {
   type Testimonial,
 } from "./types";
 
-/* -------------------------------------------------------------------------- */
-/* Compliance gate (§11.2)                                                     */
-/* -------------------------------------------------------------------------- */
-
-export interface GateFailure {
-  reason:
-    | "NOT_PUBLISHED"
-    | "AUTHORIZATION_MISSING"
-    | "AUTHORIZATION_UNAVAILABLE"
-    | "EVIDENCE_MISSING"
-    | "EVIDENCE_EXPIRED"
-    | "NO_ACTIVE_PLAN";
-  detail: string;
-}
-
-/**
- * A product is purchasable only when every §11.2 condition holds.
- * Turnitin is seeded as UNAVAILABLE_INDIVIDUAL_LICENSE with no plan, so it is
- * visible in the catalogue for information but can never be bought.
- */
-export function evaluatePurchaseGate(product: Product): GateFailure | null {
-  if (product.status !== "PUBLISHED") {
-    return { reason: "NOT_PUBLISHED", detail: `${product.name} is not published.` };
-  }
-  if (product.authorizationStatus === "PENDING_VERIFICATION") {
-    return {
-      reason: "EVIDENCE_MISSING",
-      detail: `${product.name} has no authorization evidence on file.`,
-    };
-  }
-  // §11.2 / mandatory test #4: expired evidence makes the listing unpurchasable
-  // immediately, even though it may stay visible for information.
-  if (product.authorizationStatus === "EXPIRED_EVIDENCE") {
-    return {
-      reason: "EVIDENCE_EXPIRED",
-      detail: `${product.name} authorization evidence has expired and must be renewed before it can be sold again.`,
-    };
-  }
-  if (!PUBLISHABLE_AUTHORIZATION.includes(product.authorizationStatus)) {
-    return {
-      reason: "AUTHORIZATION_UNAVAILABLE",
-      detail: `${product.name} has no individual licence channel.`,
-    };
-  }
-  const activePlans = product.plans.filter((plan) => plan.active);
-  if (activePlans.length === 0) {
-    return { reason: "NO_ACTIVE_PLAN", detail: `${product.name} has no active plan.` };
-  }
-  return null;
-}
-
-export function isPurchasable(product: Product): boolean {
-  return evaluatePurchaseGate(product) === null;
-}
-
-/* -------------------------------------------------------------------------- */
-/* Availability (§9.2.2)                                                       */
-/* -------------------------------------------------------------------------- */
-
-const LOW_STOCK_THRESHOLD = 5;
-
-export function availabilityOf(product: Product): Availability {
-  if (!isPurchasable(product)) return "UNAVAILABLE";
-
-  const tracked = product.plans.filter(
-    (plan) => plan.active && plan.inventoryMode !== "UNLIMITED",
-  );
-  if (tracked.length === 0) return "IN_STOCK";
-
-  const total = tracked.reduce((sum, plan) => sum + (plan.stock ?? 0), 0);
-  if (total <= 0) return "UNAVAILABLE";
-  if (total <= LOW_STOCK_THRESHOLD) return "LOW_STOCK";
-  return "IN_STOCK";
-}
+export {
+  availabilityOf,
+  cheapestActivePlan,
+  evaluatePurchaseGate,
+  isPurchasable,
+} from "./catalogue-rules";
+export type { GateFailure } from "./catalogue-rules";
 
 /* -------------------------------------------------------------------------- */
 /* Products                                                                    */
 /* -------------------------------------------------------------------------- */
-
-export function cheapestActivePlan(product: Product): ProductPlan | null {
-  const active = product.plans
-    .filter((plan) => plan.active)
-    .sort((a, b) => a.pricePoisha - b.pricePoisha);
-  return active[0] ?? null;
-}
-
-/** Published products, deterministically ordered (featured first, then name). */
-export function listProducts(): Product[] {
-  return sortProducts(products.filter((product) => product.status === "PUBLISHED"));
-}
 
 /** Sort by featured first, then name — deterministic and stable for SSR. */
 function sortProducts(items: Product[]): Product[] {
@@ -133,11 +58,16 @@ function sortProducts(items: Product[]): Product[] {
   });
 }
 
-export function listProductItems(opts?: { purchasableOnly?: boolean }): ProductListItem[] {
+/** Published products, deterministically ordered (featured first, then name). */
+export async function listProducts(): Promise<Product[]> {
+  return sortProducts(products.filter((product) => product.status === "PUBLISHED"));
+}
+
+export async function listProductItems(opts?: {
+  purchasableOnly?: boolean;
+}): Promise<ProductListItem[]> {
   const published = products.filter((product) => product.status === "PUBLISHED");
-  const filtered = opts?.purchasableOnly
-    ? published.filter(isPurchasable)
-    : published;
+  const filtered = opts?.purchasableOnly ? published.filter(isPurchasable) : published;
 
   return sortProducts(filtered).map((product) => {
     const cheapest = cheapestActivePlan(product);
@@ -150,44 +80,43 @@ export function listProductItems(opts?: { purchasableOnly?: boolean }): ProductL
   });
 }
 
-export function getProductBySlug(slug: string): Product | undefined {
+export async function getProductBySlug(slug: string): Promise<Product | undefined> {
   return products.find((product) => product.slug === slug && product.status === "PUBLISHED");
 }
 
-export function listTrending(limit = 8): ProductListItem[] {
-  return listProductItems({ purchasableOnly: true })
-    .filter((item) => item.product.isTrending)
-    .slice(0, limit);
+export async function listTrending(limit = 8): Promise<ProductListItem[]> {
+  const items = await listProductItems({ purchasableOnly: true });
+  return items.filter((item) => item.product.isTrending).slice(0, limit);
 }
 
-export function listBestSellers(limit = 8): ProductListItem[] {
-  return listProductItems({ purchasableOnly: true })
-    .filter((item) => item.product.isBestseller)
-    .slice(0, limit);
+export async function listBestSellers(limit = 8): Promise<ProductListItem[]> {
+  const items = await listProductItems({ purchasableOnly: true });
+  return items.filter((item) => item.product.isBestseller).slice(0, limit);
 }
 
-export function listFeatured(limit = 6): ProductListItem[] {
-  return listProductItems({ purchasableOnly: true })
-    .filter((item) => item.product.isFeatured)
-    .slice(0, limit);
+export async function listFeatured(limit = 6): Promise<ProductListItem[]> {
+  const items = await listProductItems({ purchasableOnly: true });
+  return items.filter((item) => item.product.isFeatured).slice(0, limit);
 }
 
-export function listStudentEligible(limit = 8): ProductListItem[] {
-  return listProductItems({ purchasableOnly: true })
-    .filter((item) => item.product.isStudentEligible)
-    .slice(0, limit);
+export async function listStudentEligible(limit = 8): Promise<ProductListItem[]> {
+  const items = await listProductItems({ purchasableOnly: true });
+  return items.filter((item) => item.product.isStudentEligible).slice(0, limit);
 }
 
-export function listByCategory(slug: Category["slug"]): ProductListItem[] {
-  return listProductItems().filter((item) => item.product.categorySlug === slug);
+export async function listByCategory(slug: Category["slug"]): Promise<ProductListItem[]> {
+  const items = await listProductItems();
+  return items.filter((item) => item.product.categorySlug === slug);
 }
 
-export function listByVertical(vertical: BrandVertical): ProductListItem[] {
-  return listProductItems().filter((item) => item.product.vertical === vertical);
+export async function listByVertical(vertical: BrandVertical): Promise<ProductListItem[]> {
+  const items = await listProductItems();
+  return items.filter((item) => item.product.vertical === vertical);
 }
 
-export function listRelated(product: Product, limit = 4): ProductListItem[] {
-  return listProductItems({ purchasableOnly: true })
+export async function listRelated(product: Product, limit = 4): Promise<ProductListItem[]> {
+  const items = await listProductItems({ purchasableOnly: true });
+  return items
     .filter(
       (item) =>
         item.product.id !== product.id &&
@@ -197,7 +126,9 @@ export function listRelated(product: Product, limit = 4): ProductListItem[] {
     .slice(0, limit);
 }
 
-export function getPlanBySku(sku: string): { product: Product; plan: ProductPlan } | undefined {
+export async function getPlanBySku(
+  sku: string,
+): Promise<{ product: Product; plan: ProductPlan } | undefined> {
   for (const product of products) {
     const plan = product.plans.find((candidate) => candidate.sku === sku);
     if (plan) return { product, plan };
@@ -209,7 +140,7 @@ export function getPlanBySku(sku: string): { product: Product; plan: ProductPlan
 /* Categories & verticals                                                      */
 /* -------------------------------------------------------------------------- */
 
-export function listCategories(): (Category & { itemCount: number })[] {
+export async function listCategories(): Promise<(Category & { itemCount: number })[]> {
   return categories.map((category) => ({
     ...category,
     itemCount: products.filter(
@@ -221,17 +152,19 @@ export function listCategories(): (Category & { itemCount: number })[] {
   }));
 }
 
-export function getCategory(slug: string): Category | undefined {
+export async function getCategory(slug: string): Promise<Category | undefined> {
   return categories.find((category) => category.slug === slug);
 }
 
-export function listVerticals(): {
-  slug: BrandVertical;
-  label: string;
-  blurb: string;
-  itemCount: number;
-  serviceCount: number;
-}[] {
+export async function listVerticals(): Promise<
+  {
+    slug: BrandVertical;
+    label: string;
+    blurb: string;
+    itemCount: number;
+    serviceCount: number;
+  }[]
+> {
   return VERTICALS.map((vertical) => ({
     slug: vertical,
     label: VERTICAL_META[vertical].label,
@@ -252,13 +185,13 @@ export function listVerticals(): {
 /* Services (Vertical B)                                                       */
 /* -------------------------------------------------------------------------- */
 
-export function listServices(): Service[] {
+export async function listServices(): Promise<Service[]> {
   return services
     .filter((service) => service.status === "PUBLISHED")
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
-export function getServiceBySlug(slug: string): Service | undefined {
+export async function getServiceBySlug(slug: string): Promise<Service | undefined> {
   return services.find((service) => service.slug === slug && service.status === "PUBLISHED");
 }
 
@@ -266,11 +199,11 @@ export function getServiceBySlug(slug: string): Service | undefined {
 /* Bundles                                                                     */
 /* -------------------------------------------------------------------------- */
 
-export function listBundles(): Bundle[] {
+export async function listBundles(): Promise<Bundle[]> {
   return bundles.filter((bundle) => bundle.status === "PUBLISHED");
 }
 
-export function getBundleBySlug(slug: string): Bundle | undefined {
+export async function getBundleBySlug(slug: string): Promise<Bundle | undefined> {
   return bundles.find((bundle) => bundle.slug === slug && bundle.status === "PUBLISHED");
 }
 
@@ -278,11 +211,11 @@ export function getBundleBySlug(slug: string): Bundle | undefined {
 /* Site content                                                                */
 /* -------------------------------------------------------------------------- */
 
-export function listFaqs(): Faq[] {
+export async function listFaqs(): Promise<Faq[]> {
   return faqs;
 }
 
-export function getAnnouncement() {
+export async function getAnnouncement(): Promise<typeof announcement | null> {
   return announcement.active ? announcement : null;
 }
 
@@ -290,7 +223,7 @@ export function getAnnouncement() {
  * Empty until the platform has completed, moderated orders (§9.1.2).
  * The homepage section hides itself rather than showing invented quotes.
  */
-export function listTestimonials(): Testimonial[] {
+export async function listTestimonials(): Promise<Testimonial[]> {
   return testimonials.filter((testimonial) => testimonial.verified);
 }
 
@@ -306,13 +239,15 @@ export interface SearchHit {
   provider?: string;
 }
 
-export function search(query: string, limit = 12): SearchHit[] {
+export async function search(query: string, limit = 12): Promise<SearchHit[]> {
   const q = query.trim().toLowerCase();
   if (q.length < 2) return [];
 
   const matches = (haystack: string) => haystack.toLowerCase().includes(q);
 
-  const productHits: SearchHit[] = listProductItems()
+  const [productItems, serviceItems] = await Promise.all([listProductItems(), listServices()]);
+
+  const productHits: SearchHit[] = productItems
     .filter(
       ({ product }) =>
         matches(product.name) ||
@@ -328,7 +263,7 @@ export function search(query: string, limit = 12): SearchHit[] {
       provider: product.provider,
     }));
 
-  const serviceHits: SearchHit[] = listServices()
+  const serviceHits: SearchHit[] = serviceItems
     .filter((service) => matches(service.name) || matches(service.shortDescription))
     .slice(0, limit)
     .map((service) => ({
