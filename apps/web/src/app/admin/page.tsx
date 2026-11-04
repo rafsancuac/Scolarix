@@ -24,6 +24,7 @@ import { capabilityMatrix, DATABASE_CONNECTED, QUEUE_CONNECTED } from "@/lib/che
 import { formatBDT } from "@/lib/money";
 import { formatDate } from "@/lib/format";
 import { breadcrumbJsonLd } from "@/lib/metadata";
+import { displayContact } from "@/lib/pii";
 import {
   countServiceRequests,
   listServiceRequests,
@@ -463,9 +464,9 @@ function QueueCard({
                 <div className="min-w-0">
                   <p className="tnum text-caption font-medium text-primary">{request.reference}</p>
                   <p className="truncate text-caption text-secondary">
-                    {request.serviceName} · {request.contact.name}
+                    {request.serviceName} · {displayContact(request).name}
                   </p>
-                  <p className="truncate text-caption text-muted">{request.contact.email}</p>
+                  <p className="truncate text-caption text-muted">{displayContact(request).email}</p>
                 </div>
                 <span className="tnum shrink-0 text-caption text-muted">
                   {formatDate(request.createdAt)}
@@ -481,11 +482,11 @@ function QueueCard({
                 </p>
               ) : null}
               <p className="mt-2 line-clamp-3 rounded-input bg-surface-2 px-3 py-2 text-caption text-secondary">
-                {request.brief}
+                {displayContact(request).brief}
               </p>
               <p className="mt-2 text-caption text-muted">
                 Declaration acknowledged {formatDate(request.declaration.acknowledgedAt)} · IP{" "}
-                <code className="rounded bg-surface-2 px-1">{request.declaration.ipAddress}</code>
+                <code className="rounded bg-surface-2 px-1">{displayContact(request).ipAddress}</code>
               </p>
             </li>
           ))}

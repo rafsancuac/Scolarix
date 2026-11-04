@@ -24,6 +24,7 @@ import { capabilityMatrix, DATABASE_CONNECTED, EMAIL_CONNECTED } from "@/lib/che
 import { countServiceRequests, listServiceRequests } from "@/lib/request-store";
 import { listProductItems } from "@/lib/repository";
 import { breadcrumbJsonLd } from "@/lib/metadata";
+import { displayContact } from "@/lib/pii";
 
 export const dynamic = "force-dynamic";
 
@@ -255,7 +256,7 @@ export default async function DashboardPage() {
                           {request.reference}
                         </p>
                         <p className="text-caption text-secondary">
-                          {request.serviceName} · {request.contact.email}
+                          {request.serviceName} · {displayContact(request).email}
                         </p>
                         {request.matchedFlags.length > 0 ? (
                           <p className="mt-1 flex flex-wrap gap-1.5">
