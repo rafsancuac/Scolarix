@@ -26,3 +26,6 @@ docker-compose.override.yml
 
 .npm-cache/
 apps/web/.next-start*.log
+
+# Local dev PostgreSQL data (embedded-postgres)
+packages/database/.pgdata/
