@@ -14,6 +14,7 @@
 import { NextResponse } from "next/server";
 
 import { capabilityMatrix, DATA_ADAPTER } from "@/lib/checkout";
+import { endpointFromUrl, tcpReachable } from "@/lib/net-probe";
 import { listProducts } from "@/lib/repository";
 
 export const dynamic = "force-dynamic";
@@ -42,10 +43,17 @@ export async function GET() {
     ...(DATA_ADAPTER === "prisma"
       ? [
           probe("database", async () => {
-            // Wired to `prisma.$queryRaw SELECT 1` in Phase 2.
-            return Boolean(process.env.DATABASE_URL);
+            // Credential presence is necessary but not sufficient (§17.4):
+            // a set DATABASE_URL pointing at a stopped container must not
+            // report ok. Wired to `prisma.$queryRaw SELECT 1` in Phase 2;
+            // TCP reachability is the honest interim probe.
+            const endpoint = endpointFromUrl(process.env.DATABASE_URL);
+            return endpoint !== null && (await tcpReachable(endpoint));
           }),
-          probe("queue", async () => Boolean(process.env.REDIS_URL)),
+          probe("queue", async () => {
+            const endpoint = endpointFromUrl(process.env.REDIS_URL);
+            return endpoint !== null && (await tcpReachable(endpoint));
+          }),
         ]
       : []),
   ]);
